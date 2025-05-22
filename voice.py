@@ -20,7 +20,7 @@ async def play_audio_from_text(input_text: str) -> None:
         start_time = time.time()
         async with openai_client.audio.speech.with_streaming_response.create(
             model="gpt-4o-mini-tts",  # Using a generally available model, adjust if needed
-            voice="coral",           # Example voice, can be changed
+            voice="onyx",           # Example voice, can be changed
             input=input_text,
             instructions=instructions,
             response_format="pcm",   # Pulse Code Modulation, common raw audio format

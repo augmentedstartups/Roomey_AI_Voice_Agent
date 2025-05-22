@@ -46,11 +46,8 @@ async def chat_with_agent(agent):
 
             speech_time = asyncio.get_event_loop().time() - speech_start_time
             print(f"\033[90m[Speech generated and played in {speech_time:.2f} seconds]\033[0m")
-            
-      
             total_time = streaming_time + speech_time
             print(f"\033[90m[Total response time: {total_time:.2f} seconds]\033[0m")
-            
             print("\033[0m")  # Reset color
                     
         except KeyboardInterrupt:
