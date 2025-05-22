@@ -12,14 +12,12 @@ async def chat_with_agent(agent):
     
     while True:
         try:
-            # Get user input
             try:
                 user_input = input("\nYou: ").strip()
             except EOFError:
                 print("\nInput error detected. Ending chat session.")
                 break
             
-            # Check for exit conditions
             if user_input.lower() in ('exit', 'quit'):
                 print("\nEnding chat session. Goodbye!")
                 break
@@ -27,8 +25,9 @@ async def chat_with_agent(agent):
             if not user_input:
                 continue
                 
-            # Get and stream the agent's response in blue
-            print("\n\033[94mAgent: ", end="", flush=True)  # Blue color start
+            print("\n\033[94mAgent: ", end="", flush=True)  
+            
+            start_time = asyncio.get_event_loop().time()
             
             result = Runner.run_streamed(agent, input=user_input)
             response_text = ""
@@ -37,9 +36,22 @@ async def chat_with_agent(agent):
                     print(event.data.delta, end="", flush=True)
                     response_text += event.data.delta
             
-            # Now await the async function properly
+            streaming_time = asyncio.get_event_loop().time() - start_time
+            print(f"\n\033[90m[Agent response streamed in {streaming_time:.2f} seconds]\033[0m")
+            
+            speech_start_time = asyncio.get_event_loop().time()
+             
             await play_audio_from_text(response_text)
-            print("\033[0m")  # Reset color and add newline
+            
+
+            speech_time = asyncio.get_event_loop().time() - speech_start_time
+            print(f"\033[90m[Speech generated and played in {speech_time:.2f} seconds]\033[0m")
+            
+      
+            total_time = streaming_time + speech_time
+            print(f"\033[90m[Total response time: {total_time:.2f} seconds]\033[0m")
+            
+            print("\033[0m")  # Reset color
                     
         except KeyboardInterrupt:
             print("\n\nEnding chat session. Goodbye!")
