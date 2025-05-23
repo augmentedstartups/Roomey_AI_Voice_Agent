@@ -1,31 +1,7 @@
-"""
-## Documentation
-Quickstart: https://github.com/google-gemini/cookbook/blob/main/quickstarts/Get_started_LiveAPI.py
-
-## Setup
-
-To install the dependencies for this script, run:
-
-```
-pip install google-genai opencv-python pyaudio pillow mss pynput
-```
-"""
-
-import os
-import asyncio
-import base64
-import io
-import traceback
-from pynput import keyboard as pynput_keyboard # Changed from 'keyboard' to 'pynput'
-from dotenv import load_dotenv # Added to load .env file
-
-import cv2
-import pyaudio
-import PIL.Image
-import mss
-
-import argparse
-
+import os, asyncio, base64, io, traceback
+from pynput import keyboard as pynput_keyboard
+from dotenv import load_dotenv
+import cv2, pyaudio, PIL.Image, mss, argparse
 from google import genai
 from google.genai import types
 load_dotenv() # Added to load .env file
@@ -39,7 +15,7 @@ CHUNK_SIZE = 1024
 
 MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
 
-DEFAULT_MODE = "camera"
+DEFAULT_MODE = "none"
 
 client = genai.Client(
     http_options={"api_version": "v1beta"},
