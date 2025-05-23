@@ -1,0 +1,1 @@
+Currently capable of searching web, setting light values and getting stock price without a function

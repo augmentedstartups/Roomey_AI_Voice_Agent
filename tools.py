@@ -25,12 +25,73 @@ set_light_values_declaration = {
     },
 }
 
-Add in a tool for getting stocks\
-    stock_price_agent = Agent(
-    name='stock_agent',
-    instructions= 'You are an agent who retrieves stock prices. If a ticker symbol is provided, fetch the current price. If only a company name is given, first perform a Google search to find the correct ticker symbol before retrieving the stock price. If the provided ticker symbol is invalid or data cannot be retrieved, inform the user that the stock price could not be found.',
-    handoff_description='This agent specializes in retrieving real-time stock prices within 2 decimal places. Given a stock ticker symbol (e.g., AAPL, GOOG, MSFT) or the stock name, use the tools and reliable data sources to provide the most up-to-date price.',
-    tools=[get_stock_price,WebSearchTool(search_context_size="low")],
+set_sound_values_declaration = {
+    "name": "set_sound_values",
+    "behavior": "NON_BLOCKING",
+    "description": "Sets the volumne and profile of a sound.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "volume": {
+                "type": "integer",
+                "description": "Volume level from 0 to 100. Zero is off and 100 is full volume",
+            },
+            "profile": {
+                "type": "string",
+                "enum": ["base", "dynamic", "vocal"],
+                "description": "Profile of the sound, which can be `base`, `dynamic` or `vocal`.",
+            },
+        },
+        "required": ["volume", "profile"],
+    },
+}
+
+set_reminder_declaration = {
+    "name": "set_reminder",
+    "behavior": "NON_BLOCKING",
+    "description": "Sets a reminder.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "item": {
+                "type": "string",
+                "description": "Item to be reminded of",
+            },
+            "time": {
+                "type": "string",
+                "description": "Time to be reminded of",
+            },
+        },
+        "required": ["item"],
+    },
+}
+
+
+# ===== FUNCTIONS =====
+def set_reminder(item: str, time: str) -> dict[str, str]:
+    """Set a reminder. (mock API).
+
+    Args:
+        item: Item to be reminded of
+        time: Time to be reminded of
+
+    Returns:
+        A dictionary containing the set item and time.
+    """
+    return {"item": item, "time": time}
+
+def set_sound_values(volume: int, profile: str) -> dict[str, int | str]:
+    """Set the volume and profile of a sound. (mock API).
+
+    Args:
+        volume: Volume level from 0 to 100. Zero is off and 100 is full volume
+        profile: Profile of the sound, which can be `base`, `dynamic` or `vocal`.
+
+    Returns:
+        A dictionary containing the set volume and profile.
+    """
+    return {"volume": volume, "profile": profile}
+
 
 
 # ===== FUNCTIONS =====
@@ -54,6 +115,6 @@ def get_tools():
     """Returns the list of tools configured for the AI assistant."""
     return [
         {"google_search": {}},
-        {"function_declarations": [set_light_values_declaration]},
+        {"function_declarations": [set_light_values_declaration, set_sound_values_declaration, set_reminder_declaration]},
     ]
 
