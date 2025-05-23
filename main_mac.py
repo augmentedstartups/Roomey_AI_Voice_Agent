@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import cv2, pyaudio, PIL.Image, mss, argparse
 from google import genai
 from google.genai import types
+from tools import get_tools
 load_dotenv() # Added to load .env file
 
 
@@ -22,9 +23,7 @@ client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY"),
 )
 
-tools = [
-    types.Tool(google_search=types.GoogleSearch()),
-]
+tools = get_tools()
 
 CONFIG = types.LiveConnectConfig(
     response_modalities=[
