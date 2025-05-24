@@ -1,10 +1,10 @@
-import os, asyncio, base64, io, traceback, json
+import os, asyncio, base64, io, traceback
 from pynput import keyboard as pynput_keyboard
 from dotenv import load_dotenv
 import cv2, pyaudio, PIL.Image, mss, argparse
 from google import genai
 from google.genai import types
-from tools import get_tool_declarations, function_map
+from tools import get_tools
 load_dotenv() # Added to load .env file
 
 
@@ -14,7 +14,6 @@ SEND_SAMPLE_RATE = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE = 1024
 
-# MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
 MODEL = "models/gemini-2.0-flash-live-001"
 
 DEFAULT_MODE = "none"
@@ -23,10 +22,7 @@ client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY"),
 )
 
-
-
-# For LiveConnectConfig, tools need to be a list of dictionaries with function_declarations inside
-tools=[{"function_declarations": get_tool_declarations()}]
+tools = get_tools()
 
 CONFIG = types.LiveConnectConfig(
     response_modalities=[
@@ -35,7 +31,7 @@ CONFIG = types.LiveConnectConfig(
     media_resolution="MEDIA_RESOLUTION_MEDIUM",
     speech_config=types.SpeechConfig(
         voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Puck")
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
         )
     ),
     context_window_compression=types.ContextWindowCompressionConfig(
@@ -43,7 +39,7 @@ CONFIG = types.LiveConnectConfig(
         sliding_window=types.SlidingWindow(target_tokens=12800),
     ),
     tools=tools,
-    realtime_input_config=types.RealtimeInputConfig( 
+    realtime_input_config=types.RealtimeInputConfig( # Added to disable VAD
         automatic_activity_detection=types.AutomaticActivityDetection(disabled=True)
     )
 )
@@ -77,51 +73,6 @@ class AudioLoop:
             print("\n🛑 Recording stopped. (Press 't' to start)")
             if self.session:
                 await self.session.send_realtime_input(activity_end=types.ActivityEnd())
-                
-    async def handle_function_call(self, response_text, tool_call):
-        if tool_call and hasattr(tool_call, 'function_calls') and tool_call.function_calls:
-            function_responses = []
-            
-            for fc in tool_call.function_calls:
-                print(f"\n🔧 Function call detected: {fc.name}")
-                
-                # Get the actual function implementation from our map
-                if fc.name in function_map:
-                    # Get the function to execute
-                    func = function_map[fc.name]
-                    
-                    # Parse the arguments if any
-                    args = {}
-                    if hasattr(fc, 'args') and fc.args:
-                        args = fc.args
-                    
-                    # Execute the function
-                    try:
-                        result = func(**args)
-                        print(f"Function result: {result}")
-                        
-                        # Create a function response
-                        function_response = types.FunctionResponse(
-                            id=fc.id,  # Important: Include the ID from the function call
-                            name=fc.name,
-                            response=result
-                        )
-                        
-                        function_responses.append(function_response)
-                    except Exception as e:
-                        print(f"Error executing function: {e}")
-                else:
-                    print(f"Unknown function: {fc.name}")
-            
-            # Send all function responses back to the model
-            if function_responses:
-                try:
-                    await self.session.send_tool_response(function_responses=function_responses)
-                    return True
-                except Exception as e:
-                    print(f"Error sending function responses: {e}")
-                    
-        return False
 
     def _on_press(self, key): # Changed for pynput
         try:
@@ -278,28 +229,16 @@ class AudioLoop:
             
         while True:
             turn = self.session.receive()
-            current_text = ""
-            
-            async for chunk in turn:
-                # Handle audio data
-                if hasattr(chunk, 'data') and chunk.data:
-                    self.audio_in_queue.put_nowait(chunk.data)
+            async for response in turn:
+                if data := response.data:
+                    self.audio_in_queue.put_nowait(data)
                     continue
-                    
-                # Handle text responses from server content
-                if hasattr(chunk, 'server_content') and chunk.server_content:
-                    if hasattr(chunk, 'text') and chunk.text is not None:
-                        current_text += chunk.text
-                        # Store the response
-                        self.ai_responses.append(chunk.text)
-                        # Print with AI: prefix for clarity
-                        print(f"AI: {chunk.text}", end="")
-                
-                # Check for tool calls
-                if hasattr(chunk, 'tool_call') and chunk.tool_call:
-                    print(f"\nDetected tool call")
-                    await self.handle_function_call(current_text, chunk.tool_call)
-            
+                if text := response.text:
+                    # Store the response
+                    self.ai_responses.append(text)
+                    # Print with AI: prefix for clarity
+                    print(f"AI: {text}", end="")
+
             # If you interrupt the model, it sends a turn_complete.
             # For interruptions to work, we need to stop playback.
             # So empty out the audio queue because it may have loaded
