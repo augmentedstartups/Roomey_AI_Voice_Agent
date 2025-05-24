@@ -24,7 +24,11 @@ client = genai.Client(
 )
 
 # For LiveConnectConfig, tools need to be a list of dictionaries with function_declarations inside
-tools=[{"function_declarations": get_tool_declarations()}]
+# We can combine custom function declarations with built-in tools like Google Search
+tools=[
+    {"function_declarations": get_tool_declarations()},  # Your custom functions
+    {"google_search": types.GoogleSearch()}  # Built-in Google Search tool
+]
 
 CONFIG = types.LiveConnectConfig(
     response_modalities=[
@@ -41,11 +45,15 @@ CONFIG = types.LiveConnectConfig(
         sliding_window=types.SlidingWindow(target_tokens=12800),
     ),
     system_instruction=types.Content(
-        parts=[types.Part.from_text(text="""You are a helpful assistant. My name is Ritesh Kanjee, founder of Augmented AI. I am a tech entrepreneur and AI enthusiast. 
-        You have access to the following tools
-        1. get_reminders: Gets the user's reminders
-        2. get_secret_key: Gets the user's secret key (its not actualy a secret key, its just a test for my function calling test.)
+        parts=[types.Part.from_text(text="""You are a helpful assistant. My name is Ritesh Kanjee, founder of Augmented AI. I am a tech entrepreneur and AI enthusiast. I live in South Africa.
+        You have access to the following tools:
+        1. get_reminders: Gets the user's saved reminders from the reminders.json file
+        2. set_reminder: Saves a new reminder with optional reminder time (e.g., 'tomorrow at 3pm')
+        3. manage_reminder: Manages existing reminders - can edit or delete specific reminders or delete all reminders
+        4. get_secret_key: Gets the user's secret key (it's not actually a secret key, it's just a test for function calling)
         
+        You also have access to Google Search to find information online.
+
         """)],
         role="user"
     ),
