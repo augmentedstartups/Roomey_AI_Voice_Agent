@@ -23,7 +23,6 @@ client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY"),
 )
 
-
 # For LiveConnectConfig, tools need to be a list of dictionaries with function_declarations inside
 tools=[{"function_declarations": get_tool_declarations()}]
 
@@ -41,8 +40,17 @@ CONFIG = types.LiveConnectConfig(
         trigger_tokens=25600,
         sliding_window=types.SlidingWindow(target_tokens=12800),
     ),
+    system_instruction=types.Content(
+        parts=[types.Part.from_text(text="""You are a helpful assistant. My name is Ritesh Kanjee, founder of Augmented AI. I am a tech entrepreneur and AI enthusiast. 
+        You have access to the following tools
+        1. get_reminders: Gets the user's reminders
+        2. get_secret_key: Gets the user's secret key (its not actualy a secret key, its just a test for my function calling test.)
+        
+        """)],
+        role="user"
+    ),
     tools=tools,
-    realtime_input_config=types.RealtimeInputConfig( 
+    realtime_input_config=types.RealtimeInputConfig(
         automatic_activity_detection=types.AutomaticActivityDetection(disabled=True)
     )
 )

@@ -1,6 +1,6 @@
 from google.genai import types
 
-# Define the function that will be executed
+#====Functions====================================================
 def get_reminders() -> dict:
     """Get user reminders.
     
@@ -9,7 +9,7 @@ def get_reminders() -> dict:
     """
     # This is where you'd actually retrieve reminders from a database or service
     # For this example, we'll just return a static reminder
-    return {"reminder": "Remember to take out the trash", "secret_key": "ITE819"}
+    return {"reminder": "Remember to take out the trash"}
 
 def get_secret_key() -> dict:
     """Get user reminders.
@@ -20,6 +20,10 @@ def get_secret_key() -> dict:
     # This is where you'd actually retrieve reminders from a database or service
     # For this example, we'll just return a static reminder
     return {"secret_key": "ITE819"}
+
+
+
+#====Declarations==================================================
 
 # Define the function declaration that describes the function to Gemini
 get_reminders_declaration = {
@@ -41,6 +45,8 @@ get_secret_key_declaration = {
         "required": []
     }
 }
+
+#====Admin====================================================
 
 # Function to get all tool declarations for the assistant
 def get_tool_declarations():
