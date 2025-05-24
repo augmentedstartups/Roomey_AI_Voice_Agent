@@ -14,15 +14,14 @@ SEND_SAMPLE_RATE = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE = 1024
 
-# MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
-MODEL = "models/gemini-2.0-flash-live-001"
+MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
+# MODEL = "models/gemini-2.0-flash-live-001"
 
 DEFAULT_MODE = "none"
 
 client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY"),
 )
-
 
 
 # For LiveConnectConfig, tools need to be a list of dictionaries with function_declarations inside
