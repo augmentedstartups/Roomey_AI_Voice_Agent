@@ -5,7 +5,7 @@ import cv2, pyaudio, PIL.Image, mss, argparse
 from google import genai
 from google.genai import types
 from tools import get_tool_declarations, function_map
-load_dotenv() # Added to load .env file
+load_dotenv() # Added to load .env file 
 
 
 FORMAT = pyaudio.paInt16
