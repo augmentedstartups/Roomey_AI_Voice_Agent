@@ -73,7 +73,7 @@ def get_calendar_service():
         print(f"Error building Google Calendar service: {e}")
         return None
 
-def get_calendar_events(days=7, max_events=5):
+def get_calendar_events(days=14, max_events=10):
     """Get upcoming events from the user's Google Calendar.
     
     Args:

@@ -9,3 +9,4 @@ utils/__pycache__/
 integrations/calendar/credentials/*.json
 integrations/calendar/token.pickle
 integrations/calendar/__pycache__/
+integrations/calendar/credentials/token.pickle
