@@ -39,10 +39,10 @@ Roomey is an ultra-low latency AI Voice Agent designed to seamlessly integrate i
 
 ## 🔮 Coming Soon
 
-- **MCP Integration**: Enhanced capabilities through Model Context Protocol
-- **Additional Tools**: Expanding Roomey's functionality with more integrations
-- **Voice Customization**: Personalize Roomey's voice to your preferences
-- **Multi-room Support**: Seamless experience across your entire home
+[ ] **MCP Integration**: Enhanced capabilities through Model Context Protocol
+[ ] **Additional Tools**: Expanding Roomey's functionality with more integrations
+[ ] **Voice Customization**: Personalize Roomey's voice to your preferences
+[ ] **Multi-room Support**: Seamless experience across your entire home
 
 ## 🛠️ Technical Architecture
 
@@ -56,7 +56,57 @@ Roomey is built on a modular architecture that allows for easy expansion and cus
 
 ## 🚀 Getting Started
 
-Detailed setup and installation instructions coming soon!
+Follow these steps to set up and run Roomey on your system:
+
+### Prerequisites
+
+- Python 3.9+ installed on your system
+- Git for cloning the repository
+- Internet connection for API access
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/augmentedstartups/Roomey_AI_Voice_Agent.git
+   cd Roomey_AI_Voice_Agent
+   ```
+
+2. **Create a virtual environment**
+   ```bash
+   python -m venv myenv
+   ```
+
+3. **Activate the environment**
+   ```bash
+   source myenv/bin/activate  # On macOS/Linux
+   ```
+
+4. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+5. **Set up environment variables**
+   - Create a `.env` file in the root directory
+   - Add your API keys and configuration (see `.env.example` for reference)
+
+### Running Roomey
+
+1. **Activate the environment** (if not already activated)
+   ```bash
+   source myenv/bin/activate
+   ```
+
+2. **Run the main application**
+   ```bash
+   python main_mac.py
+   ```
+
+3. **Interact with Roomey**
+   - Speak naturally to Roomey
+   - Ask questions, request information, or give commands
+   - Explore the various integrations
 
 ## 📚 Documentation
 
