@@ -37,18 +37,11 @@ from integrations.respeaker_leds.voice_assistant_leds import voice_leds
 load_dotenv() # Added to load .env file
 
 
-# Audio configuration
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-SEND_SAMPLE_RATE = 16000  # Keep mic input at 16kHz as required by Gemini
-RECEIVE_SAMPLE_RATE = 24000  # Restored to 24kHz for correct voice pitch
-CHUNK_SIZE = 4096  # Further increased buffer size for smoother playback
-
-# Audio buffer configuration
-AUDIO_BUFFER_SIZE = 5  # Reduced buffer size for lower latency while maintaining smoothness
-
-# Audio thread priority (higher number = higher priority, range 0-99)
-AUDIO_THREAD_PRIORITY = 80  # Set audio threads to high priority
+SEND_SAMPLE_RATE = 16000
+RECEIVE_SAMPLE_RATE = 24000  # Changed from 24000 to 16000 to match headphone capabilities
+CHUNK_SIZE = 4096
 
 # Audio device configuration
 INPUT_DEVICE_INDEX = 2  # Index 2: Logitech Webcam C930e
@@ -404,13 +397,6 @@ class AudioLoop:
             current_text = ""
             response_started = False
             
-            # Clear the audio queue before starting a new response
-            while not self.audio_in_queue.empty():
-                try:
-                    self.audio_in_queue.get_nowait()
-                except:
-                    pass
-                    
             async for chunk in turn:
                 # Handle audio data
                 if hasattr(chunk, 'data') and chunk.data:
@@ -418,13 +404,8 @@ class AudioLoop:
                     if not response_started:
                         voice_leds.speaking()
                         response_started = True
-                        print("Receiving audio response...")
                     
-                    try:
-                        # Add audio chunk to queue with error handling
-                        await self.audio_in_queue.put(chunk.data)
-                    except Exception as e:
-                        print(f"Error queuing audio data: {e}")
+                    self.audio_in_queue.put_nowait(chunk.data)
                     continue
                     
                 # Handle text responses from server content
@@ -457,48 +438,8 @@ class AudioLoop:
                 self.audio_in_queue.get_nowait()
 
     async def play_audio(self):
-        # Try to set real-time priority for this thread
         try:
-            import ctypes
-            import ctypes.util
-            
-            # Load the POSIX threads library
-            librt = ctypes.CDLL(ctypes.util.find_library('pthread'))
-            
-            # Define the necessary structures and constants
-            class sched_param(ctypes.Structure):
-                _fields_ = [('sched_priority', ctypes.c_int)]
-                
-            SCHED_FIFO = 1  # Real-time scheduling policy
-            
-            # Set the priority for the current thread
-            param = sched_param(AUDIO_THREAD_PRIORITY)
-            result = librt.pthread_setschedparam(
-                0,  # 0 means current thread
-                SCHED_FIFO,
-                ctypes.byref(param)
-            )
-            
-            if result == 0:
-                print(f"Audio thread priority set to {AUDIO_THREAD_PRIORITY} (real-time)")
-            else:
-                print(f"Could not set thread priority: error code {result}")
-        except Exception as e:
-            print(f"Could not set thread priority: {e}")
-        
-        # Disable CPU throttling if possible
-        try:
-            # Run a command to set CPU governor to performance mode
-            import subprocess
-            subprocess.run(["echo", "performance", ">", "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"], 
-                          shell=True, 
-                          stderr=subprocess.DEVNULL)
-            print("CPU set to performance mode")
-        except Exception as e:
-            print(f"Could not set CPU governor: {e}")
-        
-        try:
-            # Use the system default output device with optimized settings
+            # Use the system default output device (headphone jack via ~/.asoundrc)
             stream = pya.open(
                 format=FORMAT,
                 channels=CHANNELS,
@@ -507,71 +448,17 @@ class AudioLoop:
                 frames_per_buffer=CHUNK_SIZE,
                 output_device_index=OUTPUT_DEVICE_INDEX,
             )
-            print(f"Audio output initialized with sample rate: {RECEIVE_SAMPLE_RATE}, buffer size: {CHUNK_SIZE}")
         except Exception as e:
             print(f"Error initializing audio output: {e}")
             raise
-            
-        # Buffer to collect audio chunks for smoother playback
-        audio_buffer = []
-        is_buffering = True
-        buffer_count = 0
-        
         while True:
-            try:
-                bytestream = await self.audio_in_queue.get()
-                
-                # Initial buffering phase
-                if is_buffering:
-                    audio_buffer.append(bytestream)
-                    buffer_count += 1
-                    
-                    # Start playback once we have enough buffered chunks
-                    if buffer_count >= AUDIO_BUFFER_SIZE:
-                        is_buffering = False
-                        print(f"Starting audio playback with {buffer_count} buffered chunks")
-                        
-                        # Play the buffered audio
-                        for chunk in audio_buffer:
-                            # Use direct write without asyncio to reduce overhead
-                            stream.write(chunk)
-                        audio_buffer = []
-                else:
-                    # Normal playback after initial buffering - direct write for less overhead
-                    stream.write(bytestream)
-                    
-            except Exception as e:
-                print(f"Error during audio playback: {e}")
-                await asyncio.sleep(0.1)  # Avoid tight loop on error
+            bytestream = await self.audio_in_queue.get()
+            await asyncio.to_thread(stream.write, bytestream)
 
     async def run(self):
         try:
             # Initialize LEDs - show wakeup pattern
             voice_leds.recording_off()
-            
-            # Set higher priority for this process to improve audio processing
-            try:
-                import os
-                os.nice(-10)  # Lower nice value = higher priority (range: -20 to 19)
-                print("Process priority increased for better audio performance")
-            except Exception as e:
-                print(f"Could not set process priority: {e}")
-                
-            # Reduce background processes if possible
-            try:
-                import subprocess
-                # Stop unnecessary services that might be using CPU
-                services_to_stop = ["bluetooth", "cups", "avahi-daemon"]
-                for service in services_to_stop:
-                    try:
-                        subprocess.run(["systemctl", "stop", service], 
-                                      stderr=subprocess.DEVNULL,
-                                      stdout=subprocess.DEVNULL)
-                        print(f"Stopped {service} service for better performance")
-                    except:
-                        pass
-            except Exception as e:
-                print(f"Could not optimize system services: {e}")
             
             async with (
                 client.aio.live.connect(model=MODEL, config=CONFIG) as session,
@@ -580,8 +467,7 @@ class AudioLoop:
                 self.session = session
                 self.main_event_loop = asyncio.get_running_loop() # Set event loop here
 
-                # Increase the audio queue size for better buffering
-                self.audio_in_queue = asyncio.Queue(maxsize=100)
+                self.audio_in_queue = asyncio.Queue()
                 self.out_queue = asyncio.Queue(maxsize=5) # For video/screen frames
 
                 send_text_task = tg.create_task(self.send_text())
