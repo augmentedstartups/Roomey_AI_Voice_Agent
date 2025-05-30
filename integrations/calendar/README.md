@@ -139,3 +139,12 @@ The Google Calendar API has usage quotas. If you exceed these limits, you may re
 ### Permissions
 
 Ensure that your Google account has the necessary permissions to access the calendar. The integration uses the `https://www.googleapis.com/auth/calendar.readonly` scope, which provides read-only access to your calendars.
+
+---
+
+<p align="left">
+  <a href="https://augmentedstartups.com">
+    <img src="../../assets/Main logo_purple.png" alt="Augmented AI Logo" width="300"/>
+  </a>
+  <br>
+</p>
