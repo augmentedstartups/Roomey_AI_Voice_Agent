@@ -5,3 +5,4 @@ __pycache__/voice.cpython-311.pyc
 __pycache__/voice.cpython-313.pyc
 utils/__pycache__/instructions.cpython-311.pyc
 .env
+.windsurf/

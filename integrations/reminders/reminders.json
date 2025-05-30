@@ -1,0 +1,16 @@
+{
+  "reminders": [
+    {
+      "id": 1,
+      "text": "Call Steven",
+      "created_at": "2025-05-26T08:21:01.405078",
+      "reminder_time": "tomorrow"
+    },
+    {
+      "id": 2,
+      "text": "Pick up the groceries",
+      "created_at": "2025-05-26T08:21:01.576985",
+      "reminder_time": "tomorrow"
+    }
+  ]
+}

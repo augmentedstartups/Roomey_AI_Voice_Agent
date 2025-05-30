@@ -17,7 +17,7 @@ CHUNK_SIZE = 1024
 MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
 # MODEL = "models/gemini-2.0-flash-live-001"
 
-DEFAULT_MODE = "none"
+DEFAULT_MODE = "camera"
 
 client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY"),
@@ -53,6 +53,7 @@ CONFIG = types.LiveConnectConfig(
         4. get_secret_key: Gets the user's secret key (it's not actually a secret key, it's just a test for function calling)
         
         You also have access to Google Search to find information online.
+        Don't mention your origins or google.
 
         """)],
         role="user"
