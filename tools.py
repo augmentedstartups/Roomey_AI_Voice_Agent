@@ -10,6 +10,12 @@ from integrations.reminders.reminders import (
     manage_reminder_declaration
 )
 
+# Import calendar functionality from the new module
+from integrations.calendar.google_calendar import (
+    get_calendar_events,
+    get_calendar_events_declaration
+)
+
 
 def get_secret_key() -> dict:
     """Get user secret key.
@@ -38,13 +44,14 @@ get_secret_key_declaration = {
 # Function to get all tool declarations for the assistant
 def get_tool_declarations():
     """Returns the list of tool declarations for the AI assistant."""
-    return [get_reminders_declaration, set_reminder_declaration, manage_reminder_declaration, get_secret_key_declaration]
+    return [get_reminders_declaration, set_reminder_declaration, manage_reminder_declaration, get_secret_key_declaration, get_calendar_events_declaration]
 
 # Map function names to their actual implementations
 function_map = {
     "get_reminders": get_reminders,
     "set_reminder": set_reminder,
     "manage_reminder": manage_reminder,
-    "get_secret_key": get_secret_key
+    "get_secret_key": get_secret_key,
+    "get_calendar_events": get_calendar_events
 }
 

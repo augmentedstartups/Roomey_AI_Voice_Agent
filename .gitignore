@@ -1,8 +1,11 @@
-__pycache__/agents_collection.cpython-311.pyc
-__pycache__/agents_collection.cpython-313.pyc
-__pycache__/tools.cpython-311.pyc
-__pycache__/voice.cpython-311.pyc
-__pycache__/voice.cpython-313.pyc
-utils/__pycache__/instructions.cpython-311.pyc
+*.pyc
+__pycache__/
+*.py[cod]
+utils/__pycache__/
 .env
 .windsurf/
+
+# Google Calendar API credentials
+integrations/calendar/credentials/*.json
+integrations/calendar/token.pickle
+integrations/calendar/__pycache__/
