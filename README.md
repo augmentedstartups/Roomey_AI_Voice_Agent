@@ -63,6 +63,7 @@ Follow these steps to set up and run Roomey on your system:
 - Python 3.9+ installed on your system
 - Git for cloning the repository
 - Internet connection for API access
+- Google Gemini API key 
 
 ### Installation
 
@@ -89,6 +90,7 @@ Follow these steps to set up and run Roomey on your system:
 
 5. **Set up environment variables**
    - Create a `.env` file in the root directory
+   - Set your `GOOGLE_GEMINI_API_KEY` as an environment variable
    - Add your API keys and configuration (see `.env.example` for reference)
 
 ### Running Roomey
