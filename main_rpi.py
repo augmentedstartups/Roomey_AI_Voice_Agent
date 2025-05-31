@@ -92,14 +92,20 @@ class AudioLoop:
         self.is_recording = False # Added for push-to-talk
         self.main_event_loop = None # Modified for GPIO listener, will be set in run()
 
-    async def toggle_recording(self): # Added for push-to-talk
-        self.is_recording = not self.is_recording
+    async def toggle_recording(self, state=None): # Added for push-to-talk
+        # If state is provided, set recording state to that value
+        # Otherwise toggle the current state
+        if state is not None:
+            self.is_recording = state
+        else:
+            self.is_recording = not self.is_recording
+            
         if self.is_recording:
-            print("\n🎤 Recording started... (Press GPIO button to stop)")
+            print("\n🎤 Recording started... (Release GPIO button to stop)")
             if self.session:
                 await self.session.send_realtime_input(activity_start=types.ActivityStart())
         else:
-            print("\n🛑 Recording stopped. (Press GPIO button to start)")
+            print("\n🛑 Recording stopped. (Press and hold GPIO button to start)")
             if self.session:
                 await self.session.send_realtime_input(activity_end=types.ActivityEnd())
                 
@@ -151,13 +157,17 @@ class AudioLoop:
     def _blocking_gpio_listener(self):
         last_state = GPIO.input(BUTTON_PIN)
         try:
-            print("Push-to-talk enabled (using GPIO button). Press the button to toggle recording.")
+            print("Push-to-talk enabled (using GPIO button). Press and hold the button to record, release to stop.")
             while True:
                 current_state = GPIO.input(BUTTON_PIN)
-                # Detect button press (transition from LOW to HIGH)
-                if current_state != last_state and current_state == GPIO.HIGH:
-                    # Button was pressed, toggle recording
-                    asyncio.run_coroutine_threadsafe(self.toggle_recording(), self.main_event_loop)
+                # Detect state changes
+                if current_state != last_state:
+                    if current_state == GPIO.LOW:
+                        # Button was pressed down - start recording
+                        asyncio.run_coroutine_threadsafe(self.toggle_recording(True), self.main_event_loop)
+                    else:
+                        # Button was released - stop recording
+                        asyncio.run_coroutine_threadsafe(self.toggle_recording(False), self.main_event_loop)
                 last_state = current_state
                 # Small delay to avoid excessive CPU usage
                 time.sleep(0.1)  # Use time.sleep instead of asyncio.sleep in a non-async context
