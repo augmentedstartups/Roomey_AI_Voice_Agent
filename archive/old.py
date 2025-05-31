@@ -1,40 +1,73 @@
-import os, asyncio, base64, io, traceback, json, time
-from dotenv import load_dotenv
-import cv2, pyaudio, PIL.Image, mss, argparse
-import RPi.GPIO as GPIO  # Import GPIO for Raspberry Pi
+"""
+## Documentation
+Quickstart: https://github.com/google-gemini/cookbook/blob/main/quickstarts/Get_started_LiveAPI.py
+
+## Setup
+
+To install the dependencies for this script, run:
+
+```
+pip install google-genai opencv-python pyaudio pillow mss
+```
+
+Note: This version uses terminal input instead of pynput for headless operation.
+"""
+
+import os
+import asyncio
+import base64
+import io
+import traceback
+import threading # For non-blocking input handling
+from dotenv import load_dotenv # Added to load .env file
+import time
+
+import cv2
+import pyaudio
+import PIL.Image
+import mss
+import RPi.GPIO as GPIO
+
+import argparse
+
 from google import genai
 from google.genai import types
 from tools import get_tool_declarations, function_map
-load_dotenv() # Added to load .env file 
+from integrations.respeaker_leds.voice_assistant_leds import voice_leds
+load_dotenv() # Added to load .env file
+
+
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+SEND_SAMPLE_RATE = 16000
+RECEIVE_SAMPLE_RATE = 24000  # Changed from 24000 to 16000 to match headphone capabilities
+CHUNK_SIZE = 4096
+
+# Audio device configuration
+INPUT_DEVICE_INDEX = 2  # Index 2: Logitech Webcam C930e
+OUTPUT_DEVICE_INDEX = None  # Use None to use system default (headphone jack via ~/.asoundrc)
 
 # GPIO Button configuration
 BUTTON_PIN = 17  # GPIO pin for the ReSpeaker button
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(BUTTON_PIN, GPIO.IN)
 
-# Audio device configuration
-# Set to None to use system default devices
-INPUT_DEVICE_INDEX = None  # Set to a specific index if needed
-OUTPUT_DEVICE_INDEX = None  # Set to a specific index if needed
-
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
-SEND_SAMPLE_RATE = 16000
-RECEIVE_SAMPLE_RATE = 24000
-CHUNK_SIZE = 4096
-
 MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
 # MODEL = "models/gemini-2.0-flash-live-001"
 
-DEFAULT_MODE = "none"
+
+DEFAULT_MODE = "text"
+
+HEADLESS = True  # Set to True when running without a display
 
 client = genai.Client(
+    http_options={"api_version": "v1beta"},
     api_key=os.environ.get("GEMINI_API_KEY"),
 )
 
 # For LiveConnectConfig, tools need to be a list of dictionaries with function_declarations inside
 # We can combine custom function declarations with built-in tools like Google Search
-tools=[
+tools = [
     {"function_declarations": get_tool_declarations()},  # Your custom functions
     {"google_search": types.GoogleSearch()}  # Built-in Google Search tool
 ]
@@ -46,7 +79,7 @@ CONFIG = types.LiveConnectConfig(
     media_resolution="MEDIA_RESOLUTION_MEDIUM",
     speech_config=types.SpeechConfig(
         voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Puck")
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
         )
     ),
     context_window_compression=types.ContextWindowCompressionConfig(
@@ -60,6 +93,7 @@ CONFIG = types.LiveConnectConfig(
         2. set_reminder: Saves a new reminder with optional reminder time (e.g., 'tomorrow at 3pm')
         3. manage_reminder: Manages existing reminders - can edit or delete specific reminders or delete all reminders
         4. get_secret_key: Gets the user's secret key (it's not actually a secret key, it's just a test for function calling)
+        5. get_calendar_events: Gets upcoming events from the user's Google Calendar
         
         You also have access to Google Search to find information online.
         Don't mention your origins or google.
@@ -68,7 +102,7 @@ CONFIG = types.LiveConnectConfig(
         role="user"
     ),
     tools=tools,
-    realtime_input_config=types.RealtimeInputConfig(
+    realtime_input_config=types.RealtimeInputConfig( # Added to disable VAD
         automatic_activity_detection=types.AutomaticActivityDetection(disabled=True)
     )
 )
@@ -90,22 +124,36 @@ class AudioLoop:
         self.play_audio_task = None
         
         self.is_recording = False # Added for push-to-talk
-        self.main_event_loop = None # Modified for GPIO listener, will be set in run()
+        self.main_event_loop = None # Modified for keyboard listener, will be set in run()
 
-    async def toggle_recording(self): # Added for push-to-talk
-        self.is_recording = not self.is_recording
+    async def toggle_recording(self, state=None): # Modified for GPIO button
+        # If state is provided, set recording state to that value
+        # Otherwise toggle the current state
+        if state is not None:
+            self.is_recording = state
+        else:
+            self.is_recording = not self.is_recording
+            
         if self.is_recording:
-            print("\n🎤 Recording started... (Press GPIO button to stop)")
+            print("\n🎤 Recording started...")
+            # Activate recording LEDs
+            voice_leds.recording_on()
             if self.session:
                 await self.session.send_realtime_input(activity_start=types.ActivityStart())
         else:
-            print("\n🛑 Recording stopped. (Press GPIO button to start)")
+            print("\n🛑 Recording stopped.")
+            # Turn off recording LEDs and show thinking pattern
+            voice_leds.recording_off()
+            voice_leds.thinking()
             if self.session:
                 await self.session.send_realtime_input(activity_end=types.ActivityEnd())
                 
     async def handle_function_call(self, response_text, tool_call):
         if tool_call and hasattr(tool_call, 'function_calls') and tool_call.function_calls:
             function_responses = []
+            
+            # Show thinking pattern while executing functions
+            voice_leds.thinking()
             
             for fc in tool_call.function_calls:
                 print(f"\n🔧 Function call detected: {fc.name}")
@@ -135,40 +183,67 @@ class AudioLoop:
                         function_responses.append(function_response)
                     except Exception as e:
                         print(f"Error executing function: {e}")
+                        voice_leds.error()  # Show error pattern
                 else:
                     print(f"Unknown function: {fc.name}")
+                    voice_leds.error()  # Show error pattern
             
             # Send all function responses back to the model
             if function_responses:
                 try:
+                    # Continue showing thinking pattern while waiting for response
+                    voice_leds.thinking()
                     await self.session.send_tool_response(function_responses=function_responses)
                     return True
                 except Exception as e:
                     print(f"Error sending function responses: {e}")
+                    voice_leds.error()  # Show error pattern
                     
         return False
 
-    def _blocking_gpio_listener(self):
+    def _gpio_button_listener(self):
+        """GPIO button-based listener for ReSpeaker button"""
+        print("Push-to-talk enabled. Press the ReSpeaker button to talk.")
         last_state = GPIO.input(BUTTON_PIN)
         try:
-            print("Push-to-talk enabled (using GPIO button). Press the button to toggle recording.")
             while True:
                 current_state = GPIO.input(BUTTON_PIN)
-                # Detect button press (transition from LOW to HIGH)
-                if current_state != last_state and current_state == GPIO.HIGH:
-                    # Button was pressed, toggle recording
-                    asyncio.run_coroutine_threadsafe(self.toggle_recording(), self.main_event_loop)
-                last_state = current_state
-                # Small delay to avoid excessive CPU usage
-                time.sleep(0.1)  # Use time.sleep instead of asyncio.sleep in a non-async context
+                
+                # Button state changed
+                if current_state != last_state:
+                    if current_state == GPIO.LOW:  # Button pressed (active low)
+                        print("Button pressed - Starting recording")
+                        asyncio.run_coroutine_threadsafe(self.toggle_recording(True), self.main_event_loop)
+                    else:  # Button released
+                        print("Button released - Stopping recording")
+                        asyncio.run_coroutine_threadsafe(self.toggle_recording(False), self.main_event_loop)
+                    
+                    last_state = current_state
+                    
+                # Small delay to prevent CPU hogging
+                time.sleep(0.1)
+                
         except Exception as e:
-            print(f"GPIO listener error: {e}")
+            print(f"Error in GPIO button listener: {e}")
         finally:
-            print("GPIO listener stopped.")
+            print("GPIO button listener stopped.")
+            GPIO.cleanup()
 
-    async def handle_gpio_input(self):
-        # Run the blocking GPIO listener in a separate thread
-        await self.main_event_loop.run_in_executor(None, self._blocking_gpio_listener)
+
+    def _blocking_listen_for_toggle_key(self):
+        """Blocking function that listens for GPIO button input"""
+        try:
+            self._gpio_button_listener()
+        except Exception as e:
+            print(f"GPIO button listener error: {e}")
+        finally:
+            print("GPIO button listener stopped.")
+
+
+    async def handle_keyboard_input(self): # Changed for pynput
+        # Run the blocking pynput listener in a separate thread
+        # The listener itself manages its own thread for event listening.
+        await self.main_event_loop.run_in_executor(None, self._blocking_listen_for_toggle_key)
 
     async def send_text(self):
         while True:
@@ -202,23 +277,32 @@ class AudioLoop:
         return {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()}
 
     async def get_frames(self):
+        # Skip camera capture in headless mode
+        if HEADLESS:
+            print("Camera capture disabled in headless mode.")
+            return
+            
         # This takes about a second, and will block the whole program
         # causing the audio pipeline to overflow if you don't to_thread it.
-        cap = await asyncio.to_thread(
-            cv2.VideoCapture, 0
-        )  # 0 represents the default camera
+        try:
+            cap = await asyncio.to_thread(
+                cv2.VideoCapture, 0
+            )  # 0 represents the default camera
 
-        while True:
-            frame = await asyncio.to_thread(self._get_frame, cap)
-            if frame is None:
-                break
+            while True:
+                frame = await asyncio.to_thread(self._get_frame, cap)
+                if frame is None:
+                    break
 
-            await asyncio.sleep(1.0)
+                await asyncio.sleep(1.0)
 
-            await self.out_queue.put(frame)
+                await self.out_queue.put(frame)
 
-        # Release the VideoCapture object
-        cap.release()
+            # Release the VideoCapture object
+            cap.release()
+        except Exception as e:
+            print(f"Error in camera capture: {e}")
+            print("Continuing without camera...")
 
     def _get_screen(self):
         sct = mss.mss()
@@ -238,15 +322,24 @@ class AudioLoop:
         return {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()}
 
     async def get_screen(self):
+        # Skip screen capture in headless mode
+        if HEADLESS:
+            print("Screen capture disabled in headless mode.")
+            return
+            
+        try:
+            while True:
+                frame = await asyncio.to_thread(self._get_screen)
+                if frame is None:
+                    break
 
-        while True:
-            frame = await asyncio.to_thread(self._get_screen)
-            if frame is None:
-                break
+                await asyncio.sleep(1.0)
 
-            await asyncio.sleep(1.0)
+                await self.out_queue.put(frame)
 
-            await self.out_queue.put(frame)
+        except Exception as e:
+            print(f"Error in screen capture: {e}")
+            print("Continuing without screen capture...")
 
     async def send_realtime(self):
         while True:
@@ -255,29 +348,24 @@ class AudioLoop:
 
     async def listen_audio(self):
         try:
-            # Use specified input device or get default if None
-            if INPUT_DEVICE_INDEX is not None:
-                input_device = INPUT_DEVICE_INDEX
-            else:
-                mic_info = pya.get_default_input_device_info()
-                input_device = mic_info["index"]
-                
-            self.audio_stream = await asyncio.to_thread(
-                pya.open,
+            # Use the Logitech C930e webcam microphone for input
+            self.audio_stream = pya.open(
                 format=FORMAT,
                 channels=CHANNELS,
                 rate=SEND_SAMPLE_RATE,
                 input=True,
-                input_device_index=input_device,
                 frames_per_buffer=CHUNK_SIZE,
+                input_device_index=INPUT_DEVICE_INDEX,
             )
+            
+            if __debug__:
+                kwargs = {"exception_on_overflow": False}
+            else:
+                kwargs = {}
+                
         except Exception as e:
             print(f"Error initializing audio input: {e}")
             raise
-        if __debug__:
-            kwargs = {"exception_on_overflow": False}
-        else:
-            kwargs = {}
         while True:
             if self.is_recording: # Modified for push-to-talk
                 try:
@@ -307,16 +395,27 @@ class AudioLoop:
         while True:
             turn = self.session.receive()
             current_text = ""
+            response_started = False
             
             async for chunk in turn:
                 # Handle audio data
                 if hasattr(chunk, 'data') and chunk.data:
+                    # If this is the first audio data chunk, switch to speaking LED pattern
+                    if not response_started:
+                        voice_leds.speaking()
+                        response_started = True
+                    
                     self.audio_in_queue.put_nowait(chunk.data)
                     continue
                     
                 # Handle text responses from server content
                 if hasattr(chunk, 'server_content') and chunk.server_content:
                     if hasattr(chunk, 'text') and chunk.text is not None:
+                        # If this is the first text chunk, switch to speaking LED pattern
+                        if not response_started:
+                            voice_leds.speaking()
+                            response_started = True
+                            
                         current_text += chunk.text
                         # Store the response
                         self.ai_responses.append(chunk.text)
@@ -328,6 +427,9 @@ class AudioLoop:
                     print(f"\nDetected tool call")
                     await self.handle_function_call(current_text, chunk.tool_call)
             
+            # Turn off speaking LEDs when response is complete
+            voice_leds.recording_off()
+            
             # If you interrupt the model, it sends a turn_complete.
             # For interruptions to work, we need to stop playback.
             # So empty out the audio queue because it may have loaded
@@ -337,26 +439,27 @@ class AudioLoop:
 
     async def play_audio(self):
         try:
-            # Use specified output device or default if None
-            stream = await asyncio.to_thread(
-                pya.open,
+            # Use the system default output device (headphone jack via ~/.asoundrc)
+            stream = pya.open(
                 format=FORMAT,
                 channels=CHANNELS,
                 rate=RECEIVE_SAMPLE_RATE,
                 output=True,
+                frames_per_buffer=CHUNK_SIZE,
                 output_device_index=OUTPUT_DEVICE_INDEX,
-                frames_per_buffer=CHUNK_SIZE,  # Use same chunk size for consistency
             )
         except Exception as e:
             print(f"Error initializing audio output: {e}")
             raise
-            
         while True:
             bytestream = await self.audio_in_queue.get()
             await asyncio.to_thread(stream.write, bytestream)
 
     async def run(self):
         try:
+            # Initialize LEDs - show wakeup pattern
+            voice_leds.recording_off()
+            
             async with (
                 client.aio.live.connect(model=MODEL, config=CONFIG) as session,
                 asyncio.TaskGroup() as tg,
@@ -370,7 +473,7 @@ class AudioLoop:
                 send_text_task = tg.create_task(self.send_text())
                 tg.create_task(self.send_realtime()) # For video/screen frames
                 tg.create_task(self.listen_audio()) # Now handles its own sending for audio
-                tg.create_task(self.handle_gpio_input()) # Added for GPIO push-to-talk
+                tg.create_task(self.handle_keyboard_input()) # Added for push-to-talk
 
                 if self.video_mode == "camera":
                     tg.create_task(self.get_frames())
@@ -384,27 +487,53 @@ class AudioLoop:
                 raise asyncio.CancelledError("User requested exit")
 
         except asyncio.CancelledError:
+            # Clean up LEDs
+            voice_leds.cleanup()
             pass
         except ExceptionGroup as EG:
+            # Show error pattern and clean up
+            voice_leds.error()
+            voice_leds.cleanup()
             self.audio_stream.close()
             traceback.print_exception(EG)
-        finally:
-            # Clean up GPIO
-            GPIO.cleanup()
 
 
 if __name__ == "__main__":
     print("🤖Starting AI Assistant...")
-    print("ℹ️ Press the GPIO button to toggle audio recording for voice input.")
+    print("ℹ️ Press the ReSpeaker button to talk.")
     print("ℹ️ Type 'q' and press Enter in the 'message >' prompt to quit.")
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
         type=str,
         default=DEFAULT_MODE,
-        help="pixels to stream from",
-        choices=["camera", "screen", "none"],
+        help="Mode to use for input. Default: %(default)s",
+        choices=["camera", "screen", "text"],
+    )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        default=HEADLESS,
+        help="Run in headless mode without display. Forces text mode.",
     )
     args = parser.parse_args()
-    main = AudioLoop(video_mode=args.mode)
-    asyncio.run(main.run())
+
+    # Force text mode if headless is enabled
+    if args.headless:
+        print("Running in headless mode. Using text mode only.")
+        args.mode = "text"
+
+    try:
+        main = AudioLoop(video_mode=args.mode)
+        asyncio.run(main.run())
+    except KeyboardInterrupt:
+        print("\nExiting application...")
+    except Exception as e:
+        print(f"\nError in main application: {e}")
+        # Show error pattern on LEDs
+        voice_leds.error()
+    finally:
+        # Clean up resources on exit
+        voice_leds.cleanup()
+        GPIO.cleanup()
+
