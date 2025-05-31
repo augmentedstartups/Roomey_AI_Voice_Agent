@@ -54,7 +54,7 @@ CONFIG = types.LiveConnectConfig(
         sliding_window=types.SlidingWindow(target_tokens=12800),
     ),
     system_instruction=types.Content(
-        parts=[types.Part.from_text(text="""You are a helpful assistant. My name is Ritesh Kanjee, founder of Augmented AI. I am a tech entrepreneur and AI enthusiast. I live in South Africa.
+        parts=[types.Part.from_text(text=os.environ.get("PERSONALIZED_PROMPT", "You are a helpful assistant.") + """
         You have access to the following tools:
         1. get_reminders: Gets the user's saved reminders from the reminders.json file
         2. set_reminder: Saves a new reminder with optional reminder time (e.g., 'tomorrow at 3pm')

@@ -90,8 +90,12 @@ Follow these steps to set up and run Roomey on your system:
 
 5. **Set up environment variables**
    - Create a `.env` file in the root directory
-   - Set your `GOOGLE_GEMINI_API_KEY` as an environment variable
-   - Add your API keys and configuration (see `.env.example` for reference)
+   - Add the following environment variables:
+     ```
+     GEMINI_API_KEY=your_gemini_api_key_here
+     PERSONALIZED_PROMPT="You are a helpful assistant. My name is [Your Name], [add personal details here]."
+     ```
+   - The `PERSONALIZED_PROMPT` allows you to customize the AI's understanding of who you are
 
 ### Running Roomey
 
