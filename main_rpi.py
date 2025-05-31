@@ -5,7 +5,9 @@ import RPi.GPIO as GPIO  # Import GPIO for Raspberry Pi
 from google import genai
 from google.genai import types
 from tools import get_tool_declarations, function_map
+from integrations.respeaker_leds.pixels import pixels # Added for LED control
 load_dotenv() # Added to load .env file 
+
 
 # GPIO Button configuration
 BUTTON_PIN = 17  # GPIO pin for the ReSpeaker button
@@ -102,10 +104,13 @@ class AudioLoop:
             
         if self.is_recording:
             print("\n🎤 Recording started... (Release GPIO button to stop)")
+            pixels.listen()  # LEDs show listening
             if self.session:
                 await self.session.send_realtime_input(activity_start=types.ActivityStart())
         else:
             print("\n🛑 Recording stopped. (Press and hold GPIO button to start)")
+            # voice_leds.recording_off() # Removed, pixels.think() handles transition
+            pixels.think()  # LEDs show thinking
             if self.session:
                 await self.session.send_realtime_input(activity_end=types.ActivityEnd())
                 
@@ -317,10 +322,14 @@ class AudioLoop:
         while True:
             turn = self.session.receive()
             current_text = ""
+            audio_started = False
             
             async for chunk in turn:
                 # Handle audio data
                 if hasattr(chunk, 'data') and chunk.data:
+                    if not audio_started:
+                        pixels.speak()  # Show speaking pattern when AI starts responding
+                        audio_started = True
                     self.audio_in_queue.put_nowait(chunk.data)
                     continue
                     
@@ -344,6 +353,9 @@ class AudioLoop:
             # much more audio than has played yet.
             while not self.audio_in_queue.empty():
                 self.audio_in_queue.get_nowait()
+            
+            # Turn off LEDs when AI finishes speaking or thinking
+            pixels.off()
 
     async def play_audio(self):
         try:
@@ -399,7 +411,8 @@ class AudioLoop:
             self.audio_stream.close()
             traceback.print_exception(EG)
         finally:
-            # Clean up GPIO
+            # Clean up GPIO and LEDs
+            pixels.off() # Ensure LEDs are off
             GPIO.cleanup()
 
 
