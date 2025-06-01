@@ -51,6 +51,12 @@ CONFIG = types.LiveConnectConfig(
         2. set_reminder: Saves a new reminder with optional reminder time (e.g., 'tomorrow at 3pm')
         3. manage_reminder: Manages existing reminders - can edit or delete specific reminders or delete all reminders
         4. get_secret_key: Gets the user's secret key (it's not actually a secret key, it's just a test for function calling)
+        5. get calendar events: Gets the user's calendar events
+        6. Control Home:
+            6.1 control home entity: Controls a home entity (e.g., turn on a light)
+            6.2 control home climate: Controls a home climate (e.g., set the temperature)
+            6.3 get home entities in room: Gets the entities in a specific room
+            6.4 find home entities by name: Finds entities by name
         
         You also have access to Google Search to find information online.
         Don't mention your origins or google.
