@@ -37,7 +37,7 @@ CONFIG = types.LiveConnectConfig(
     media_resolution="MEDIA_RESOLUTION_MEDIUM",
     speech_config=types.SpeechConfig(
         voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Puck")
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
         )
     ),
     context_window_compression=types.ContextWindowCompressionConfig(

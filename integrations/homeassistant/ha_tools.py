@@ -7,6 +7,7 @@ import os
 import json
 import sys
 from pathlib import Path
+from typing import Dict, List, Optional, Any, Union
 
 # Import the HomeAssistant class from main_home.py
 from integrations.homeassistant.main_home import HomeAssistant, print_entity_info
@@ -18,12 +19,110 @@ DEVICES_CACHE_FILE = Path(__file__).parent / "devices.json"
 # Initialize Home Assistant client (will be lazy loaded)
 _ha_client = None
 
+# Centralized entity registry
+_entity_registry: Dict[str, Dict[str, Any]] = {}
+_entities_by_room: Dict[str, List[str]] = {}
+_entities_by_type: Dict[str, List[str]] = {}
+_entity_friendly_names: Dict[str, str] = {}
+
+# Room mappings - standardize room names
+_room_mappings = {
+    'office': ['office', 'study', 'workspace'],
+    'bedroom': ['bedroom', 'main bedroom', 'master bedroom'],
+    'living_room': ['living room', 'lounge', 'family room'],
+    'kitchen': ['kitchen', 'kitchenette'],
+    'bathroom': ['bathroom', 'restroom', 'toilet'],
+    'baby_room': ['baby room', 'nursery', 'kids room']
+}
+
 def get_ha_client():
     """Get or initialize the Home Assistant client"""
     global _ha_client
     if _ha_client is None:
         _ha_client = HomeAssistant()
     return _ha_client
+
+
+def initialize_entity_registry():
+    """
+    Initialize the entity registry from the cache file
+    This creates a fast lookup table for entities by ID, name, room, and type
+    """
+    global _entity_registry, _entities_by_room, _entities_by_type, _entity_friendly_names
+    
+    # If registry is already populated, return
+    if _entity_registry:
+        return True
+        
+    try:
+        # Load entities from cache
+        if not ENTITIES_CACHE_FILE.exists():
+            print(f"Entities cache file not found: {ENTITIES_CACHE_FILE}")
+            return False
+            
+        with open(ENTITIES_CACHE_FILE, 'r') as f:
+            entities = json.load(f)
+            
+        # Build the registry
+        for entity in entities:
+            entity_id = entity.get('entity_id')
+            if not entity_id:
+                continue
+                
+            # Get basic info
+            domain = entity_id.split('.')[0]
+            friendly_name = entity.get('attributes', {}).get('friendly_name', entity_id)
+            state = entity.get('state')
+            
+            # Store in registry
+            _entity_registry[entity_id] = {
+                'friendly_name': friendly_name,
+                'domain': domain,
+                'state': state,
+                'attributes': entity.get('attributes', {})
+            }
+            
+            # Store friendly name mapping
+            _entity_friendly_names[friendly_name.lower()] = entity_id
+            
+            # Store by type/domain
+            if domain not in _entities_by_type:
+                _entities_by_type[domain] = []
+            _entities_by_type[domain].append(entity_id)
+            
+            # Try to determine room
+            room = determine_entity_room(entity_id, friendly_name)
+            if room:
+                if room not in _entities_by_room:
+                    _entities_by_room[room] = []
+                _entities_by_room[room].append(entity_id)
+                
+        return True
+    except Exception as e:
+        print(f"Error initializing entity registry: {e}")
+        return False
+        
+
+def determine_entity_room(entity_id, friendly_name):
+    """
+    Try to determine which room an entity belongs to based on its ID and name
+    
+    Args:
+        entity_id: The entity ID
+        friendly_name: The friendly name of the entity
+        
+    Returns:
+        str or None: The determined room or None if can't be determined
+    """
+    entity_text = f"{entity_id} {friendly_name}".lower()
+    
+    # Check each room name in our mappings
+    for room, aliases in _room_mappings.items():
+        for alias in aliases:
+            if alias.lower() in entity_text:
+                return room
+                
+    return None
 
 def get_cached_entities():
     """
@@ -50,6 +149,18 @@ def get_entity_names():
     Returns:
         dict: Dictionary of entity_id -> friendly_name
     """
+    # Initialize registry if needed
+    if not _entity_registry:
+        initialize_entity_registry()
+        
+    # If registry initialized, use it
+    if _entity_registry:
+        return {
+            entity_id: info.get('friendly_name', entity_id)
+            for entity_id, info in _entity_registry.items()
+        }
+    
+    # Fallback to loading from cache
     entities = get_cached_entities()
     return {
         entity.get('entity_id'): entity.get('attributes', {}).get('friendly_name', entity.get('entity_id'))
@@ -67,6 +178,24 @@ def get_entities_by_domain(domain):
     Returns:
         list: List of entities in that domain
     """
+    # Initialize registry if needed
+    if not _entity_registry:
+        initialize_entity_registry()
+    
+    # If we have the registry and this domain
+    if _entity_registry and domain in _entities_by_type:
+        # Convert to full entity objects
+        return [
+            {
+                'entity_id': entity_id,
+                'state': _entity_registry[entity_id].get('state'),
+                'attributes': _entity_registry[entity_id].get('attributes', {}),
+                'friendly_name': _entity_registry[entity_id].get('friendly_name')
+            }
+            for entity_id in _entities_by_type[domain]
+        ]
+    
+    # Fallback to loading from cache
     entities = get_cached_entities()
     return [
         entity for entity in entities
@@ -99,16 +228,60 @@ def control_entity(entity_id, action, **params):
     Returns:
         dict: Result of the operation
     """
+    # Initialize registry if needed
+    if not _entity_registry:
+        initialize_entity_registry()
+    
     ha = get_ha_client()
     
     # Validate entity_id
     if not entity_id:
         return {"success": False, "message": "No entity_id provided"}
     
+    # If entity looks like a friendly name, try to resolve it
+    if not entity_id.count('.') and _entity_friendly_names:
+        friendly_name_lower = entity_id.lower()
+        if friendly_name_lower in _entity_friendly_names:
+            entity_id = _entity_friendly_names[friendly_name_lower]
+    
+    # Check if entity exists in registry
+    entity_exists = False
+    if _entity_registry and entity_id in _entity_registry:
+        entity_exists = True
+    
     # Validate action
     valid_actions = ["on", "off", "toggle", "status", "climate"]
     if action not in valid_actions:
         return {"success": False, "message": f"Invalid action: {action}. Valid actions are: {valid_actions}"}
+    
+    # If entity doesn't exist in registry, find similar entities
+    if not entity_exists and _entity_registry:
+        # Try to find similar entities
+        similar_entities = []
+        domain = entity_id.split('.')[0] if '.' in entity_id else None
+        
+        # If we have a domain, suggest entities from that domain
+        if domain and domain in _entities_by_type:
+            similar_entities = [
+                (eid, _entity_registry[eid]['friendly_name'])
+                for eid in _entities_by_type[domain][:5]  # Limit to 5 suggestions
+            ]
+        else:
+            # Otherwise find entities with similar names
+            query = entity_id.lower()
+            for eid, info in _entity_registry.items():
+                if query in eid.lower() or query in info.get('friendly_name', '').lower():
+                    similar_entities.append((eid, info.get('friendly_name', eid)))
+                    if len(similar_entities) >= 5:  # Limit to 5 suggestions
+                        break
+        
+        if similar_entities:
+            suggestions = [f"{name} ({eid})" for eid, name in similar_entities]
+            return {
+                "success": False,
+                "entity_id": entity_id,
+                "message": f"Entity '{entity_id}' not found. Did you mean one of these? {', '.join(suggestions)}"
+            }
     
     # Get current state before action
     current_state = ha.get_entity_info(entity_id)
@@ -165,24 +338,63 @@ def find_entities_by_name(name, exact=False):
     Returns:
         list: List of matching entities
     """
-    # Try to find in cache first
-    entities = get_cached_entities()
+    # Initialize registry if needed
+    if not _entity_registry:
+        initialize_entity_registry()
+    
     matches = []
-    
     name = name.lower()
-    for entity in entities:
-        friendly_name = entity.get("attributes", {}).get("friendly_name", "").lower()
-        entity_id = entity.get("entity_id", "").lower()
-        
-        if exact:
-            if name == friendly_name or name == entity_id:
-                matches.append(entity)
-        else:
-            if name in friendly_name or name in entity_id:
-                matches.append(entity)
     
-    # If no matches found in cache or cache empty, try direct API call
-    if not matches and not entities:
+    # If registry is available, use it for fast lookups
+    if _entity_registry:
+        # First check if there's an exact match in friendly names
+        if name in _entity_friendly_names:
+            entity_id = _entity_friendly_names[name]
+            entity_info = _entity_registry[entity_id]
+            return [{
+                'entity_id': entity_id,
+                'state': entity_info.get('state'),
+                'attributes': entity_info.get('attributes', {}),
+                'friendly_name': entity_info.get('friendly_name')
+            }]
+        
+        # Otherwise search through all entities
+        for entity_id, info in _entity_registry.items():
+            friendly_name = info.get('friendly_name', '').lower()
+            entity_id_lower = entity_id.lower()
+            
+            if exact:
+                if name == friendly_name or name == entity_id_lower:
+                    matches.append({
+                        'entity_id': entity_id,
+                        'state': info.get('state'),
+                        'attributes': info.get('attributes', {}),
+                        'friendly_name': info.get('friendly_name')
+                    })
+            else:
+                if name in friendly_name or name in entity_id_lower:
+                    matches.append({
+                        'entity_id': entity_id,
+                        'state': info.get('state'),
+                        'attributes': info.get('attributes', {}),
+                        'friendly_name': info.get('friendly_name')
+                    })
+    else:
+        # Fallback to cache lookup
+        entities = get_cached_entities()
+        for entity in entities:
+            friendly_name = entity.get("attributes", {}).get("friendly_name", "").lower()
+            entity_id = entity.get("entity_id", "").lower()
+            
+            if exact:
+                if name == friendly_name or name == entity_id:
+                    matches.append(entity)
+            else:
+                if name in friendly_name or name in entity_id:
+                    matches.append(entity)
+    
+    # If no matches found in cache or registry, try direct API call
+    if not matches and not _entity_registry and not get_cached_entities():
         ha = get_ha_client()
         matches = ha.find_entities_by_name(name, exact)
     
@@ -198,20 +410,59 @@ def find_entities_in_room(room):
     Returns:
         list: List of entities in the room
     """
-    # Try to find in cache first
-    entities = get_cached_entities()
+    # Initialize registry if needed
+    if not _entity_registry:
+        initialize_entity_registry()
+    
     matches = []
+    room_lower = room.lower()
     
-    room = room.lower()
-    for entity in entities:
-        friendly_name = entity.get("attributes", {}).get("friendly_name", "").lower()
-        entity_id = entity.get("entity_id", "").lower()
-        
-        if room in friendly_name or room in entity_id:
-            matches.append(entity)
+    # Check if this room is in our standard room mappings
+    standard_room = None
+    for std_room, aliases in _room_mappings.items():
+        if room_lower == std_room or room_lower in [alias.lower() for alias in aliases]:
+            standard_room = std_room
+            break
     
-    # If no matches found in cache or cache empty, try direct API call
-    if not matches and not entities:
+    # If registry is available and we found a standard room
+    if _entity_registry and standard_room and standard_room in _entities_by_room:
+        # Return all entities in this room
+        return [
+            {
+                'entity_id': entity_id,
+                'state': _entity_registry[entity_id].get('state'),
+                'attributes': _entity_registry[entity_id].get('attributes', {}),
+                'friendly_name': _entity_registry[entity_id].get('friendly_name')
+            }
+            for entity_id in _entities_by_room[standard_room]
+        ]
+    
+    # If we don't have a standard room or it's not in our registry,
+    # do a text search through all entities
+    if _entity_registry:
+        for entity_id, info in _entity_registry.items():
+            friendly_name = info.get('friendly_name', '').lower()
+            entity_id_lower = entity_id.lower()
+            
+            if room_lower in friendly_name or room_lower in entity_id_lower:
+                matches.append({
+                    'entity_id': entity_id,
+                    'state': info.get('state'),
+                    'attributes': info.get('attributes', {}),
+                    'friendly_name': info.get('friendly_name')
+                })
+    else:
+        # Fallback to cache lookup
+        entities = get_cached_entities()
+        for entity in entities:
+            friendly_name = entity.get("attributes", {}).get("friendly_name", "").lower()
+            entity_id = entity.get("entity_id", "").lower()
+            
+            if room_lower in friendly_name or room_lower in entity_id:
+                matches.append(entity)
+    
+    # If no matches found in cache or registry, try direct API call
+    if not matches and not _entity_registry and not get_cached_entities():
         ha = get_ha_client()
         matches = ha.find_entities_in_room(room)
     
@@ -437,3 +688,18 @@ def find_home_entities_by_name(name, exact=False):
         }
     else:
         return {"message": f"No entities found matching '{name}'", "entities": []}
+
+
+# Initialize the entity registry when the module is imported
+# This ensures the AI has access to entity data immediately
+try:
+    initialize_entity_registry()
+    print(f"Home Assistant entity registry initialized with {len(_entity_registry)} entities")
+    if _entities_by_room:
+        print(f"Entities organized by {len(_entities_by_room)} rooms")
+    if _entities_by_type:
+        print(f"Entity types: {', '.join(_entities_by_type.keys())}")
+except Exception as e:
+    print(f"Note: Could not initialize Home Assistant entity registry: {e}")
+    print("The registry will be initialized on first use.")
+
