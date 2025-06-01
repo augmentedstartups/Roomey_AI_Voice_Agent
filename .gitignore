@@ -11,3 +11,8 @@ integrations/calendar/token.pickle
 integrations/calendar/__pycache__/
 integrations/calendar/credentials/token.pickle
 myenv/
+
+# Home Assistant sensitive files
+integrations/homeassistant/.home
+integrations/homeassistant/entities.json
+integrations/homeassistant/devices.json
