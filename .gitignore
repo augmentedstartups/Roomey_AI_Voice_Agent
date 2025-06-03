@@ -16,3 +16,5 @@ myenv/
 integrations/homeassistant/.home
 integrations/homeassistant/entities.json
 integrations/homeassistant/devices.json
+
+integrations/linkedinformater/output/

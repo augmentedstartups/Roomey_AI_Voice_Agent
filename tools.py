@@ -28,6 +28,9 @@ from integrations.homeassistant.ha_tools import (
     find_entities_by_name_declaration
 )
 
+# Import LinkedIn formatter functionality
+from integrations.linkedinformater.linkedin_formatter import format_linkedin_post
+
 
 def get_secret_key() -> dict:
     """Get user secret key.
@@ -51,12 +54,28 @@ get_secret_key_declaration = {
     }
 }
 
+# LinkedIn formatter function declaration
+format_linkedin_post_declaration = {
+    "name": "format_linkedin_post",
+    "description": "Creates or formats a LinkedIn post from provided context. The function will automatically extract a topic from the context.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "context": {
+                "type": "string",
+                "description": "The context information to use for generating the LinkedIn post. This should be detailed enough to create a meaningful post."
+            }
+        },
+        "required": ["context"]
+    }
+}
+
 #====Admin====================================================
 
 # Function to get all tool declarations for the AI assistant
 def get_tool_declarations():
     """Returns the list of tool declarations for the AI assistant."""
-    return [get_reminders_declaration, set_reminder_declaration, manage_reminder_declaration, get_secret_key_declaration, get_calendar_events_declaration, control_entity_declaration, control_climate_declaration, get_entities_in_room_declaration, find_entities_by_name_declaration]
+    return [get_reminders_declaration, set_reminder_declaration, manage_reminder_declaration, get_secret_key_declaration, get_calendar_events_declaration, control_entity_declaration, control_climate_declaration, get_entities_in_room_declaration, find_entities_by_name_declaration, format_linkedin_post_declaration]
 
 # Map function names to their actual implementations
 function_map = {
@@ -68,6 +87,7 @@ function_map = {
     "control_home_entity": control_home_entity,
     "control_home_climate": control_home_climate,
     "get_home_entities_in_room": get_home_entities_in_room,
-    "find_home_entities_by_name": find_home_entities_by_name
+    "find_home_entities_by_name": find_home_entities_by_name,
+    "format_linkedin_post": format_linkedin_post
 }
 

@@ -57,6 +57,7 @@ CONFIG = types.LiveConnectConfig(
             6.2 control home climate: Controls a home climate (e.g., set the temperature)
             6.3 get home entities in room: Gets the entities in a specific room
             6.4 find home entities by name: Finds entities by name
+        7. format_linkedin_post: Generates a LinkedIn post from provided context. The function will automatically extract a topic from the context and create a professionally formatted LinkedIn post in a viral, engaging style. Always ensure you search the latest news from the web before giving the context to the linkedin formatter.
         
         You also have access to Google Search to find information online.
         Don't mention your origins or google.

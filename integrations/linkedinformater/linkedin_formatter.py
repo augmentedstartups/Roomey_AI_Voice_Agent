@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 load_dotenv()
 
-def generate_linkedin_post(topic, context="", temperature=0.1, model="google/gemini-2.5-flash-preview"):
+def generate_linkedin_post(topic, context="", temperature=0.1, model="openai/gpt-4.1"):
     """
     Generate a LinkedIn post using OpenRouter API with Gemini model.
     
@@ -18,7 +18,7 @@ def generate_linkedin_post(topic, context="", temperature=0.1, model="google/gem
         topic (str): The topic for the LinkedIn post
         context (str): Additional context or knowledge to include
         temperature (float): Controls randomness in output (0.0-1.0)
-        model (str): The model to use via OpenRouter (default: google/gemini-2.5-flash-preview)
+        model (str): The model to use via OpenRouter (default: openai/gpt-4.1)
         
     Returns:
         dict: The generated LinkedIn post data with metadata
@@ -147,7 +147,7 @@ def generate_linkedin_post(topic, context="", temperature=0.1, model="google/gem
         raise
 
 def save_linkedin_post(post_data, model_name, topic_slug=None):
-    """Save the LinkedIn post data to a JSON file."""
+    """Save the LinkedIn post data to a JSON file and markdown file."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(script_dir, 'output')
     os.makedirs(output_dir, exist_ok=True)
@@ -158,18 +158,87 @@ def save_linkedin_post(post_data, model_name, topic_slug=None):
     
     # Create filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f'{output_dir}/linkedin_post_{topic_slug}_{timestamp}.json'
+    json_filename = f'{output_dir}/linkedin_post_{topic_slug}_{timestamp}.json'
+    md_filename = f'{output_dir}/linkedin_post_{topic_slug}_{timestamp}.md'
     
-    with open(filename, 'w') as f:
+    # Save as JSON
+    with open(json_filename, 'w') as f:
         json.dump(post_data, f, indent=2)
     
-    print(f"LinkedIn post saved to: {filename}")
-    return filename
+    # Save as Markdown
+    with open(md_filename, 'w') as f:
+        # Add title as H1
+        f.write(f"# {post_data['topic']}\n\n")
+        # Add post content (already formatted with line breaks)
+        f.write(post_data['post_content'])
+        # Add metadata at the bottom
+        f.write(f"\n\n---\n")
+        f.write(f"Generated: {post_data['generated_at']}\n")
+    
+    print(f"LinkedIn post saved to JSON: {json_filename}")
+    print(f"LinkedIn post saved to Markdown: {md_filename}")
+    
+    # Return both filenames as a dictionary
+    return {"json": json_filename, "markdown": md_filename}
+
+def format_linkedin_post(context):
+    """
+    Generate a LinkedIn post using only context as input.
+    The function will extract a topic from the context automatically.
+    
+    Args:
+        context (str): The context information to use for generating the LinkedIn post
+        
+    Returns:
+        str: A status message indicating success or failure
+    """
+    if not context or not isinstance(context, str) or len(context.strip()) < 10:
+        return "Error: Context is too short or invalid. Please provide more detailed information."
+    
+    try:
+        # Extract a topic from the context
+        # Initialize OpenRouter client for topic extraction
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+        )
+        
+        # Extract topic from context
+        topic_prompt = f"Given the following context, generate a concise topic (3-7 words) for a LinkedIn post. Only return the topic, nothing else.\n\nContext: {context}"
+        
+        topic_response = client.chat.completions.create(
+            extra_headers={
+                "HTTP-Referer": "https://augmentedstartups.com",
+                "X-Title": "LinkedIn Topic Extractor",
+            },
+            model="openai/gpt-4.1",
+            messages=[
+                {"role": "user", "content": topic_prompt}
+            ],
+            temperature=0.1,
+            max_tokens=20
+        )
+        
+        topic = topic_response.choices[0].message.content.strip()
+        print(f"📌 Extracted topic: {topic}")
+        
+        # Generate LinkedIn post with the extracted topic
+        post_data, model_name = generate_linkedin_post(topic, context)
+        
+        # Save to files (returns dict with 'json' and 'markdown' paths)
+        files = save_linkedin_post(post_data, model_name)
+        
+        return f"LinkedIn post about '{topic}' successfully generated and saved to:\nJSON: {files['json']}\nMarkdown: {files['markdown']}"
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"\n❌ Error in format_linkedin_post: {e}\n{error_details}")
+        return f"Error generating LinkedIn post: {str(e)}"
 
 # Example usage
 if __name__ == "__main__":
-    # Example topic and context
-    topic = "NVIDIA versus OpenAI"
+    # Example context
     context = """
     NVIDIA is a leading hardware company that designs and manufactures GPUs essential for AI development.
     OpenAI is an AI research lab that creates advanced AI models like GPT-4.
@@ -178,12 +247,18 @@ if __name__ == "__main__":
     Both companies are competing for AI talent and resources in the rapidly growing AI industry.
     """
     
+    # Test the new function that takes only context
+    result = format_linkedin_post(context)
+    print(f"\nResult: {result}")
+    
+    # Alternatively, you can still use the original function directly
     try:
-        # Generate LinkedIn post
+        # Generate LinkedIn post with explicit topic
+        topic = "NVIDIA versus OpenAI"
         post_data, model_name = generate_linkedin_post(topic, context)
         
-        # Save to file
-        filename = save_linkedin_post(post_data, model_name)
+        # Save to files (returns dict with 'json' and 'markdown' paths)
+        files = save_linkedin_post(post_data, model_name)
         
         # Print the generated post content
         print("\n" + "=" * 80)
@@ -191,7 +266,9 @@ if __name__ == "__main__":
         print("=" * 80)
         print(post_data['post_content'])
         print("=" * 80)
-        print(f"\n✅ LinkedIn post successfully generated and saved to: {filename}")
+        print(f"\n✅ LinkedIn post successfully generated and saved to:")
+        print(f"JSON: {files['json']}")
+        print(f"Markdown: {files['markdown']}")
         
     except Exception as e:
         print(f"\n❌ Error generating LinkedIn post: {e}")
