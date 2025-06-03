@@ -29,6 +29,7 @@ Roomey is an ultra-low latency AI Voice Agent designed to seamlessly integrate i
 - **Financial Data**: Get real-time stock prices and market information
 - **Calendar Integration**: Access your Google Calendar events and appointments
 - **Contextual Memory**: Roomey remembers your preferences and previous conversations
+- **LinkedIn Post Generation**: Generate viral LinkedIn posts based on provided context
 
 ## 🔧 Integrations
 
@@ -39,10 +40,10 @@ Roomey is an ultra-low latency AI Voice Agent designed to seamlessly integrate i
 
 ## 🔮 Coming Soon
 
-[ ] **MCP Integration**: Enhanced capabilities through Model Context Protocol
-[ ] **Additional Tools**: Expanding Roomey's functionality with more integrations
-[ ] **Voice Customization**: Personalize Roomey's voice to your preferences
-[ ] **Multi-room Support**: Seamless experience across your entire home
+- [ ] **MCP Integration**: Enhanced capabilities through Model Context Protocol
+- [ ] **Additional Tools**: Expanding Roomey's functionality with more integrations
+- [ ] **Voice Customization**: Personalize Roomey's voice to your preferences
+- [ ] **Multi-room Support**: Seamless experience across your entire home
 
 ## 🛠️ Technical Architecture
 
@@ -120,7 +121,26 @@ Explore the `integrations` directory for detailed documentation on each integrat
 
 ## 🤝 Contributing
 
-We welcome contributions to make Roomey even better! More details on how to contribute coming soon.
+We are a team of developers passionate about the future of AI and open-source software. With years of experience in both fields, we believe in the power of community-driven development and are excited to build tools that make AI more accessible and personalized.
+
+We welcome all forms of contributions:
+
+- Bug reports and feature requests
+- Documentation improvements
+- Code contributions
+- Testing and feedback
+- Community support
+
+How to contribute:
+
+Fork the repository
+1. Create your feature branch (git checkout -b roomey/feature/amazing-feature)
+2. Make your changes
+3. Commit your changes (git commit -m 'Add some amazing feature')
+4. Push to the branch (git push origin roomey/feature/amazing-feature)
+5. Open a Pull Request
+
+Join us in building the future of AI memory management! Your contributions help make Roomey even better for everyone.
 
 ---
 
