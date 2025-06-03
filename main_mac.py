@@ -17,7 +17,7 @@ CHUNK_SIZE = 1024
 MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
 # MODEL = "models/gemini-2.0-flash-live-001"
 
-DEFAULT_MODE = "camera"
+DEFAULT_MODE = "none"
 
 client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY"),
