@@ -19,6 +19,10 @@ load_dotenv(project_root / '.env')
 # Get Home Assistant URL and token from environment variables
 HASS_URL = os.getenv('HASS_URL')
 HASS_TOKEN = os.getenv('HASS_TOKEN')
+HASS_INTEGRATION = os.getenv('HASS_INTEGRATION', 'false').lower() == 'true'
+if not HASS_INTEGRATION:
+    print("Home Assistant integration is disabled (HASS_INTEGRATION is not true).")
+    sys.exit(0)
 
 if not HASS_URL or not HASS_TOKEN:
     print("Error: Home Assistant URL or token not set in .env file")

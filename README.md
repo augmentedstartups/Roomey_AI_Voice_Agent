@@ -82,20 +82,18 @@ Follow these steps to set up and run Roomey on your system:
 3. **Activate the environment**
    ```bash
    source myenv/bin/activate  # On macOS/Linux
+   myenv\bin\activate  # On Windows
    ```
 
 4. **Install dependencies**
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements.txt  # On macOS
+   pip install -r windows_requirements.txt  # On linux/windows
    ```
 
 5. **Set up environment variables**
-   - Create a `.env` file in the root directory
-   - Add the following environment variables:
-     ```
-     GEMINI_API_KEY=your_gemini_api_key_here
-     PERSONALIZED_PROMPT="You are a helpful assistant. My name is [Your Name], [add personal details here]."
-     ```
+   - Copy the `.env.sample` file to `.env` in the root directory
+   - Update the environment variables
    - The `PERSONALIZED_PROMPT` allows you to customize the AI's understanding of who you are
 
 ### Running Roomey

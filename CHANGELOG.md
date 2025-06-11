@@ -1,0 +1,23 @@
+# Changelog
+
+## [Dev] - 2024-06-13
+### Added
+- Environment variable toggles for integrations (Home Assistant, LinkedIn Formatter, Google Calendar, Speech-to-Text, etc.)
+- Separate requirements file fro windows `windows_requirements.txt`
+- Dynamic tool descriptions in system prompt based on enabled integrations
+- Robust signal handling for Ctrl+C/Cmd+C (graceful shutdown)
+- SpeechRecognition integration for user speech-to-text (SPEECH_TO_TEXT env variable)
+- Logging of user speech-to-text and Gemini responses in daily log files (`logs/YYYY-MM-DD.txt`)
+- Automatic creation of `logs/` directory and daily log files
+- Timestamped log entries in the format `<local datetime> User: ...` and `<local datetime> Roomey: ...`
+- Transcription of Gemini's audio-only responses to text using SpeechRecognition and logging as "Roomey"
+- Debug print statements for audio streaming, Gemini responses, and error handling
+- Device listing for available audio input devices at startup
+- All audio configuration (CHANNELS, SEND_SAMPLE_RATE, RECEIVE_SAMPLE_RATE, CHUNK_SIZE etc.) now read from environment and cast to int
+
+### Fixed
+- Improved error handling in Gemini response loop (prints errors, does not exit)
+- Only one activation method ("t" key) for push-to-talk, with clear feedback
+- Ensured logs are always flushed and up-to-date
+- Fixed issues with environment variable types (string vs int)
+- Ensured both user and system messages are always logged, even for audio-only Gemini responses

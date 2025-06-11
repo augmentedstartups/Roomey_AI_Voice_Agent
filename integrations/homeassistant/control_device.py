@@ -20,6 +20,62 @@ load_dotenv(project_root / '.env')
 # Get Home Assistant URL and token from environment variables
 HASS_URL = os.getenv('HASS_URL')
 HASS_TOKEN = os.getenv('HASS_TOKEN')
+HASS_INTEGRATION = os.getenv('HASS_INTEGRATION', 'false').lower() == 'true'
+if not HASS_INTEGRATION:
+    print("Home Assistant integration is disabled (HASS_INTEGRATION is not true). Skipping Home Assistant actions.")
+    def main():
+        print("No Home Assistant actions to perform.")
+        return
+else:
+    def main():
+        parser = argparse.ArgumentParser(description="Control Home Assistant entities")
+        parser.add_argument("entity_id", help="The entity ID to control")
+        parser.add_argument("--action", choices=["toggle", "turn_on", "turn_off", "set"], 
+                            default="toggle", help="Action to perform")
+        parser.add_argument("--brightness", type=int, help="Brightness value (0-255)")
+        parser.add_argument("--rgb", nargs=3, type=int, help="RGB color (three values)")
+        parser.add_argument("--color-temp", type=int, help="Color temperature")
+        parser.add_argument("--temperature", type=float, help="Temperature setting")
+        parser.add_argument("--hvac-mode", help="HVAC mode (heat, cool, auto, off)")
+        args = parser.parse_args()
+        current = get_entity_state(args.entity_id)
+        if current:
+            print(f"Current state of {args.entity_id}:")
+            print(f"  State: {current.get('state')}")
+            print(f"  Attributes: {json.dumps(current.get('attributes', {}), indent=2)}")
+        domain = args.entity_id.split('.')[0]
+        if domain == "light":
+            if args.action == "toggle":
+                toggle_switch(args.entity_id)
+            elif args.action in ["turn_on", "set"]:
+                set_light(args.entity_id, args.brightness, args.rgb, args.color_temp)
+            elif args.action == "turn_off":
+                call_service("light", "turn_off", args.entity_id)
+        elif domain == "climate":
+            if args.temperature or args.hvac_mode:
+                set_climate(args.entity_id, args.temperature, args.hvac_mode)
+            else:
+                print(f"Please specify temperature or hvac_mode for climate entity")
+        elif domain in ["switch", "automation", "input_boolean"]:
+            if args.action == "toggle":
+                toggle_switch(args.entity_id)
+            elif args.action == "turn_on":
+                call_service(domain, "turn_on", args.entity_id)
+            elif args.action == "turn_off":
+                call_service(domain, "turn_off", args.entity_id)
+        else:
+            if args.action == "toggle":
+                toggle_switch(args.entity_id)
+            elif args.action in ["turn_on", "turn_off"]:
+                service = args.action
+                call_service(domain, service, args.entity_id)
+            else:
+                print(f"Action {args.action} not supported for domain {domain}")
+        updated = get_entity_state(args.entity_id)
+        if updated:
+            print(f"\nUpdated state of {args.entity_id}:")
+            print(f"  State: {updated.get('state')}")
+            print(f"  Attributes: {json.dumps(updated.get('attributes', {}), indent=2)}")
 
 if not HASS_URL or not HASS_TOKEN or HASS_TOKEN == 'your_long_lived_token_here':
     print("Error: Home Assistant URL or token not set in .env file")
@@ -128,70 +184,6 @@ def set_climate(entity_id, temperature=None, hvac_mode=None):
             print(f"Failed to set {entity_id}")
     else:
         print(f"No parameters specified for {entity_id}")
-
-def main():
-    parser = argparse.ArgumentParser(description="Control Home Assistant entities")
-    parser.add_argument("entity_id", help="The entity ID to control")
-    parser.add_argument("--action", choices=["toggle", "turn_on", "turn_off", "set"], 
-                        default="toggle", help="Action to perform")
-    
-    # Light parameters
-    parser.add_argument("--brightness", type=int, help="Brightness value (0-255)")
-    parser.add_argument("--rgb", nargs=3, type=int, help="RGB color (three values)")
-    parser.add_argument("--color-temp", type=int, help="Color temperature")
-    
-    # Climate parameters
-    parser.add_argument("--temperature", type=float, help="Temperature setting")
-    parser.add_argument("--hvac-mode", help="HVAC mode (heat, cool, auto, off)")
-    
-    args = parser.parse_args()
-    
-    # Get current state to show before making changes
-    current = get_entity_state(args.entity_id)
-    if current:
-        print(f"Current state of {args.entity_id}:")
-        print(f"  State: {current.get('state')}")
-        print(f"  Attributes: {json.dumps(current.get('attributes', {}), indent=2)}")
-    
-    # Determine the domain of the entity
-    domain = args.entity_id.split('.')[0]
-    
-    # Handle different entity types
-    if domain == "light":
-        if args.action == "toggle":
-            toggle_switch(args.entity_id)
-        elif args.action in ["turn_on", "set"]:
-            set_light(args.entity_id, args.brightness, args.rgb, args.color_temp)
-        elif args.action == "turn_off":
-            call_service("light", "turn_off", args.entity_id)
-    elif domain == "climate":
-        if args.temperature or args.hvac_mode:
-            set_climate(args.entity_id, args.temperature, args.hvac_mode)
-        else:
-            print(f"Please specify temperature or hvac_mode for climate entity")
-    elif domain in ["switch", "automation", "input_boolean"]:
-        if args.action == "toggle":
-            toggle_switch(args.entity_id)
-        elif args.action == "turn_on":
-            call_service(domain, "turn_on", args.entity_id)
-        elif args.action == "turn_off":
-            call_service(domain, "turn_off", args.entity_id)
-    else:
-        # Generic service call for other entity types
-        if args.action == "toggle":
-            toggle_switch(args.entity_id)
-        elif args.action in ["turn_on", "turn_off"]:
-            service = args.action
-            call_service(domain, service, args.entity_id)
-        else:
-            print(f"Action {args.action} not supported for domain {domain}")
-    
-    # Get updated state after making changes
-    updated = get_entity_state(args.entity_id)
-    if updated:
-        print(f"\nUpdated state of {args.entity_id}:")
-        print(f"  State: {updated.get('state')}")
-        print(f"  Attributes: {json.dumps(updated.get('attributes', {}), indent=2)}")
 
 if __name__ == "__main__":
     main()
