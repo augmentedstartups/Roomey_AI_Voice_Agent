@@ -82,21 +82,33 @@ Follow these steps to set up and run Roomey on your system:
 3. **Activate the environment**
    ```bash
    source myenv/bin/activate  # On macOS/Linux
+   myenv\bin\activate  # On Windows
    ```
 
 4. **Install dependencies**
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements.txt  # On macOS
+   pip install -r windows_requirements.txt  # On linux/windows
    ```
 
 5. **Set up environment variables**
-   - Create a `.env` file in the root directory
-   - Add the following environment variables:
-     ```
-     GEMINI_API_KEY=your_gemini_api_key_here
-     PERSONALIZED_PROMPT="You are a helpful assistant. My name is [Your Name], [add personal details here]."
-     ```
+   - Copy the `.env.sample` file to `.env` in the root directory
+   - Update the environment variables
    - The `PERSONALIZED_PROMPT` allows you to customize the AI's understanding of who you are
+
+6. **MCP Integration**
+
+  - Roomey now supports dynamic MCP integration using a config file, not environment variables.
+  - Configure one or more MCP servers in `integrations/mcp/mcp_servers.json` (see below).
+  - The assistant can call any tool on any configured MCP server.
+  - Example tool call:
+    ```
+    {
+      "server_name": "calculator",
+      "tool_name": "add",
+      "parameters": {"a": 2, "b": 3}
+    }
+    ```
 
 ### Running Roomey
 
@@ -141,6 +153,52 @@ Fork the repository
 5. Open a Pull Request
 
 Join us in building the future of AI memory management! Your contributions help make Roomey even better for everyone.
+
+## MCP Integration (Multi-Server, Dynamic Launch)
+
+Roomey can now launch and connect to any number of MCP servers, defined in a JSON config file. No environment variable is needed to enable MCP; if `integrations/mcp/mcp_servers.json` exists and is valid, all servers will be launched and available as tools.
+
+### Configuration
+
+1. **Edit or create `integrations/mcp/mcp_servers.json`:**
+
+```json
+{
+  "mcpServers": {
+    "calculator": {
+      "command": "uvx",
+      "args": ["mcp-server-calculator"]
+    }
+  }
+}
+```
+
+- Each server entry defines how to launch the server (command, args, and optional env vars).
+- You can add as many servers as you like.
+- The config file path can be overridden with the `MCP_CONFIG_PATH` environment variable.
+
+2. **On startup, Roomey will:**
+   - Launch each server as a subprocess.
+   - Wait briefly for servers to start.
+   - Register a `call_mcp_tool` function for Gemini, allowing you to call any tool on any configured server.
+
+### Usage
+
+- The `call_mcp_tool` function is available if at least one server is configured.
+- You can call tools on any server by specifying the `server_name` (as in the config), `tool_name`, and parameters.
+
+### Example
+
+To add a new server, add an entry to `mcp_servers.json`:
+
+```json
+"my_custom_server": {
+  "command": "uvx",
+  "args": ["npx", "-y", "@modelcontextprotocol/server-custom", "--option"]
+}
+```
+
+**Note:** MCP integration is now fully config-driven. There is no need for any MCP-related environment variable.
 
 ---
 
