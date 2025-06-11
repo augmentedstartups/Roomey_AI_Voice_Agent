@@ -1,6 +1,6 @@
 # Changelog
 
-## [Dev] - 2024-06-13
+## [Dev] - 2025-06-11
 ### Added
 - Environment variable toggles for integrations (Home Assistant, LinkedIn Formatter, Google Calendar, Speech-to-Text, etc.)
 - Separate requirements file fro windows `windows_requirements.txt`
@@ -22,3 +22,10 @@
 - Fixed issues with environment variable types (string vs int)
 - Ensured both user and system messages are always logged, even for audio-only Gemini responses
 - Google calendar integration initialization
+
+
+## [Dev] - 2025-06-12
+### Added
+- MCP Support using `npx` with Auto discovery
+- New environment variables for MCP (MCP_ENABLED, MCP_CONFIG_PATH, NODEJS_BIN_PATH)
+- Gemini API error handler 

@@ -1,5 +1,6 @@
 import os
 from google.genai import types
+import asyncio # Import asyncio
 
 # Import reminders functionality from the new module
 from integrations.reminders.reminders import (
@@ -76,10 +77,45 @@ format_linkedin_post_declaration = {
     }
 }
 
+# MCP integration (dynamic, config-driven)
+from integrations.mcp.mcp_client import MultiMCPClient, load_mcp_server_config
+
+mcp_client = None # Initialize mcp_client as None
+MCP_AVAILABLE = False
+
+async def initialize_mcp_client():
+    global mcp_client, MCP_AVAILABLE
+    try:
+        mcp_config = load_mcp_server_config()
+        if mcp_config:
+            mcp_client = MultiMCPClient()
+            await mcp_client.initialize()
+            MCP_AVAILABLE = True
+        else:
+            MCP_AVAILABLE = False
+    except Exception as e:
+        MCP_AVAILABLE = False
+
+async def cleanup_mcp_client():
+    global mcp_client, MCP_AVAILABLE
+    if mcp_client and MCP_AVAILABLE:
+        try:
+            await mcp_client.cleanup()
+        except Exception as e:
+            print(f"[MCP] Cleanup completed with minor warnings: {e}")
+        finally:
+            # Reset the global state
+            mcp_client = None
+            MCP_AVAILABLE = False
+
+# Removed call_mcp_tool and call_mcp_tool_declaration as they are replaced by dynamic MCP tools
+
 #====Admin====================================================
 
-def get_tool_declarations():
+async def get_tool_declarations():
     """Returns the list of tool declarations for the AI assistant."""
+    # Note: MCP tools are added dynamically after initialization
+
     declarations = [
         get_reminders_declaration,
         set_reminder_declaration,
@@ -97,6 +133,20 @@ def get_tool_declarations():
             get_entities_in_room_declaration,
             find_entities_by_name_declaration
         ]
+    
+    if MCP_AVAILABLE and mcp_client: # Check mcp_client is not None
+        mcp_declarations = mcp_client.get_gemini_tool_declarations()
+        if mcp_declarations:
+            print("[MCP] Adding dynamically discovered MCP tools to declarations.")
+            declarations.extend(mcp_declarations)
+        else:
+            print("[MCP] No dynamic MCP tools found to add to declarations.")
+
+    print("\n--- Tools available to Roomey ---")
+    for decl in declarations:
+        print(f"Tool: {decl["name"]}\n  Description: {decl["description"]}")
+    print("-------------------------------------------")
+
     return declarations
 
 # Map function names to their actual implementations
@@ -105,11 +155,12 @@ def get_function_map():
         "get_reminders": get_reminders,
         "set_reminder": set_reminder,
         "manage_reminder": manage_reminder,
-        "get_secret_key": get_secret_key,
-        "get_calendar_events": get_calendar_events
+        "get_secret_key": get_secret_key
     }
     if LINKEDIN_FORMATTER_INTEGRATION:
         function_map["format_linkedin_post"] = format_linkedin_post
+    if GOOGLE_CALENDAR_INTEGRATION:
+        function_map["get_calendar_events"] = get_calendar_events
     if HASS_INTEGRATION:
         function_map.update({
             "control_home_entity": control_home_entity,
@@ -117,8 +168,19 @@ def get_function_map():
             "get_home_entities_in_room": get_home_entities_in_room,
             "find_home_entities_by_name": find_home_entities_by_name
         })
+    
+    if MCP_AVAILABLE and mcp_client: # Check mcp_client is not None
+        # Dynamically add functions for each discovered MCP tool
+        for gemini_tool_decl in mcp_client.get_gemini_tool_declarations():
+            gemini_tool_name = gemini_tool_decl["name"]
+            # Create a closure function to wrap the async execute_gemini_mcp_tool call
+            # Use default parameter to capture the current value of gemini_tool_name
+            def create_mcp_wrapper(tool_name=gemini_tool_name):
+                return lambda **kwargs: asyncio.run(mcp_client.execute_gemini_mcp_tool(tool_name, kwargs))
+            function_map[gemini_tool_name] = create_mcp_wrapper()
+            print(f"[MCP] Mapped function '{gemini_tool_name}' to MCP client execution.")
+    
     return function_map
 
 # For backward compatibility
 function_map = get_function_map()
-

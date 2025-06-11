@@ -4,11 +4,13 @@ from dotenv import load_dotenv
 import cv2, pyaudio, PIL.Image, mss, argparse
 from google import genai
 from google.genai import types
-from tools import get_tool_declarations, function_map
+from tools import get_tool_declarations, function_map, initialize_mcp_client, cleanup_mcp_client
 import threading
 import signal
 import speech_recognition as sr
 import datetime
+
+APP_SHUTDOWN_EVENT = asyncio.Event() # Global event for graceful shutdown
 
 load_dotenv() # Added to load .env file 
 
@@ -29,72 +31,10 @@ client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY"),
 )
 
-# For LiveConnectConfig, tools need to be a list of dictionaries with function_declarations inside
-# We can combine custom function declarations with built-in tools like Google Search
-tools=[
-    {"function_declarations": get_tool_declarations()},  # Your custom functions
-    {"google_search": types.GoogleSearch()}  # Built-in Google Search tool
-]
-
 # Integration flags (should match tools.py)
 LINKEDIN_FORMATTER_INTEGRATION = os.getenv('LINKEDIN_FORMATTER_INTEGRATION', 'false').lower() == 'true'
 HASS_INTEGRATION = os.getenv('HASS_INTEGRATION', 'false').lower() == 'true'
 GOOGLE_CALENDAR_INTEGRATION = os.getenv('GOOGLE_CALENDAR_INTEGRATION', 'false').lower() == 'true'
-
-# Build dynamic tool list for system instruction
-TOOL_DESCRIPTIONS = [
-    "- get_reminders: Gets your saved reminders from the reminders.json file",
-    "- set_reminder: Saves a new reminder with optional reminder time (e.g., 'tomorrow at 3pm')",
-    "- manage_reminder: Manage, edit, or delete your reminders",
-    "- get_secret_key: Gets your secret key (for testing function calling)",
-]
-
-
-if GOOGLE_CALENDAR_INTEGRATION:
-    TOOL_DESCRIPTIONS.append(
-        "- get_calendar_events: Gets your Google Calendar events"
-    )
-
-if HASS_INTEGRATION:
-    TOOL_DESCRIPTIONS += [
-        "- control_home_entity: Control a home entity (e.g., turn on a light)",
-        "- control_home_climate: Control a home climate (e.g., set the temperature)",
-        "- get_home_entities_in_room: Get the entities in a specific room",
-        "- find_home_entities_by_name: Find entities by name",
-    ]
-if LINKEDIN_FORMATTER_INTEGRATION:
-    TOOL_DESCRIPTIONS.append(
-        "- format_linkedin_post: Generate a LinkedIn post from provided context. The function will extract a topic and create a professionally formatted, viral-style post."
-    )
-
-
-TOOL_DESCRIPTIONS = [desc for desc in TOOL_DESCRIPTIONS if desc]
-
-system_instruction_text = os.environ.get("PERSONALIZED_PROMPT", "You are a helpful assistant.") + "\nYou have access to the following tools:\n" + "\n".join(TOOL_DESCRIPTIONS) + "\n\nYou also have access to Google Search to find information online.\nDon't mention your origins or google.\n"
-
-CONFIG = types.LiveConnectConfig(
-    response_modalities=[
-        "AUDIO",
-    ],
-    media_resolution="MEDIA_RESOLUTION_MEDIUM",
-    speech_config=types.SpeechConfig(
-        voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=VOICE_NAME)
-        )
-    ),
-    context_window_compression=types.ContextWindowCompressionConfig(
-        trigger_tokens=25600,
-        sliding_window=types.SlidingWindow(target_tokens=12800),
-    ),
-    system_instruction=types.Content(
-        parts=[types.Part.from_text(text=system_instruction_text)],
-        role="user"
-    ),
-    tools=tools,
-    realtime_input_config=types.RealtimeInputConfig(
-        automatic_activity_detection=types.AutomaticActivityDetection(disabled=True)
-    )
-)
 
 pya = pyaudio.PyAudio()
 info = pya.get_host_api_info_by_index(0)
@@ -118,11 +58,9 @@ class AudioLoop:
         self.is_recording = False # Added for push-to-talk
         self.main_event_loop = None # Modified for keyboard listener, will be set in run()
         self.audio_buffer = bytearray()  # Buffer for audio to be transcribed
+        self.shutdown_event = asyncio.Event() # Added for graceful shutdown
         if LOG_CONVERSATION:
             self.recognizer = sr.Recognizer()
-            print("Recognizer initialized")
-            # self.sr_mic = sr.Microphone()
-            # print("Microphone initialized")
         self.log_file_path = None
 
     def _get_log_file_path(self):
@@ -137,6 +75,137 @@ class AudioLoop:
             self.log_file_path = self._get_log_file_path()
         with open(self.log_file_path, 'a', encoding='utf-8') as f:
             f.write(f"{role}: {message}\n")
+
+    def _handle_gemini_api_error(self, error):
+        """
+        Dynamic comprehensive error handling for all Gemini API errors.
+        Logs the error, provides user-friendly messages, and safely exits.
+        """
+        import sys
+        
+        # Log the full error details
+        error_timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        error_str = str(error)
+        error_type = type(error).__name__
+        
+        # Create error log entry
+        error_log = f"\n{'='*60}\n"
+        error_log += f"GEMINI API ERROR - {error_timestamp}\n"
+        error_log += f"Error Type: {error_type}\n"
+        error_log += f"Error Message: {error_str}\n"
+        error_log += f"{'='*60}\n"
+        
+        # Log to file if logging enabled
+        if LOG_CONVERSATION:
+            try:
+                if not self.log_file_path:
+                    self.log_file_path = self._get_log_file_path()
+                with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                    f.write(error_log)
+                    f.write(f"Full Traceback:\n{traceback.format_exc()}\n")
+            except Exception as log_error:
+                print(f"[WARNING] Could not log error to file: {log_error}")
+        
+        # Print detailed error information to console
+        print(f"\n🚨 [GEMINI API ERROR] {error_timestamp}")
+        print(f"Error Type: {error_type}")
+        print(f"Error Details: {error_str}")
+        
+        # Analyze error and provide specific guidance
+        error_message_lower = error_str.lower()
+        
+        if "quota" in error_message_lower and "billing" in error_message_lower:
+            print("\n📋 ISSUE: API Quota Exceeded")
+            print("💡 SOLUTION:")
+            print("   • Visit: https://aistudio.google.com/apikey")
+            print("   • Check your usage limits and billing settings")
+            print("   • Consider upgrading your plan if needed")
+            print("   • Wait for quota reset if on free tier")
+            print("   • Free tier resets daily, paid plans have higher limits")
+            
+        elif "api key" in error_message_lower or "authentication" in error_message_lower or "401" in error_str:
+            print("\n📋 ISSUE: API Key Authentication Failed")
+            print("💡 SOLUTION:")
+            print("   • Check your GEMINI_API_KEY in .env file")
+            print("   • Ensure the API key is valid and not expired")
+            print("   • Visit: https://aistudio.google.com/apikey to generate a new key")
+            print("   • Make sure there are no extra spaces or characters")
+            
+        elif "connectionclosederror" in error_message_lower.replace(" ", "") or "1011" in error_str:
+            print("\n📋 ISSUE: WebSocket Connection Failed")
+            print("💡 SOLUTION:")
+            print("   • Check your internet connection")
+            print("   • Verify API quota hasn't been exceeded")
+            print("   • Try again in a few minutes (service may be temporarily unavailable)")
+            print("   • Check firewall/proxy settings")
+            
+        elif "timeout" in error_message_lower or "timed out" in error_message_lower:
+            print("\n📋 ISSUE: Connection Timeout")
+            print("💡 SOLUTION:")
+            print("   • Check your internet connection stability")
+            print("   • Try again with a more stable network")
+            print("   • Service may be experiencing high load")
+            
+        elif "rate limit" in error_message_lower or "429" in error_str:
+            print("\n📋 ISSUE: Rate Limit Exceeded")
+            print("💡 SOLUTION:")
+            print("   • Wait a few minutes before trying again")
+            print("   • Consider upgrading to a higher tier plan")
+            print("   • Implement request throttling in your usage")
+            
+        elif "model" in error_message_lower and ("not found" in error_message_lower or "invalid" in error_message_lower):
+            print("\n📋 ISSUE: Invalid Model Configuration")
+            print("💡 SOLUTION:")
+            print("   • Check the MODEL variable in the code")
+            print("   • Ensure you have access to the specified model")
+            print("   • Try using a different model (e.g., gemini-2.0-flash-live-001)")
+            
+        elif "permission" in error_message_lower or "forbidden" in error_message_lower or "403" in error_str:
+            print("\n📋 ISSUE: Permission Denied")
+            print("💡 SOLUTION:")
+            print("   • Check if your API key has the required permissions")
+            print("   • Ensure your account has access to the Gemini API")
+            print("   • Contact Google support if permissions seem correct")
+            
+        else:
+            print("\n📋 ISSUE: Unknown Gemini API Error")
+            print("💡 GENERAL SOLUTIONS:")
+            print("   • Check your internet connection")
+            print("   • Verify your GEMINI_API_KEY in .env file")
+            print("   • Check API quota at: https://aistudio.google.com/apikey")
+            print("   • Try again in a few minutes")
+            print("   • Check Google Gemini API status page")
+        
+        # Common troubleshooting steps
+        print(f"\n🔧 TROUBLESHOOTING STEPS:")
+        print("   1. Check your .env file for correct GEMINI_API_KEY")
+        print("   2. Verify internet connectivity")
+        print("   3. Check API usage at: https://aistudio.google.com/apikey")
+        print("   4. Review any recent billing or account changes")
+        print("   5. Try running the script again after resolving the issue")
+        
+        # Print full traceback for debugging
+        print(f"\n🐛 FULL ERROR TRACEBACK:")
+        print("-" * 50)
+        traceback.print_exc()
+        print("-" * 50)
+        
+        print(f"\n⚠️  APPLICATION WILL NOW EXIT SAFELY")
+        print("   Please resolve the above issue and restart the application.")
+        print("   All resources have been cleaned up properly.")
+        
+        # Trigger graceful shutdown
+        APP_SHUTDOWN_EVENT.set()
+        
+        # Force exit after a short delay to ensure cleanup
+        import asyncio
+        try:
+            # Give time for cleanup
+            loop = asyncio.get_event_loop()
+            loop.call_later(2, sys.exit, 1)
+        except:
+            # Fallback if no event loop
+            sys.exit(1)
 
     async def toggle_recording(self): # Added for push-to-talk
         self.is_recording = not self.is_recording
@@ -261,6 +330,7 @@ class AudioLoop:
                 "message > ",
             )
             if text.lower() == "q":
+                self.shutdown_event.set()
                 break
             await self.session.send(input=text or ".", end_of_turn=True)
 
@@ -465,6 +535,82 @@ class AudioLoop:
 
     async def run(self):
         try:
+            # Initialize MCP client with timeout to include MCP tools in initial declarations
+            try:
+                await asyncio.wait_for(initialize_mcp_client(), timeout=10.0)
+            except asyncio.TimeoutError:
+                print("[WARNING] MCP initialization timed out after 10 seconds (non-critical)")
+            except Exception as e:
+                print(f"[WARNING] MCP initialization failed (non-critical): {e}")
+
+            # For LiveConnectConfig, tools need to be a list of dictionaries with function_declarations inside
+            # We can combine custom function declarations with built-in tools like Google Search
+            tools=[
+                {"function_declarations": await get_tool_declarations()},  # Your custom functions
+                {"google_search": types.GoogleSearch()}  # Built-in Google Search tool
+            ]
+
+            # Build dynamic tool list for system instruction including MCP tools
+            from tools import MCP_AVAILABLE, mcp_client
+            
+            TOOL_DESCRIPTIONS = [
+                "- get_reminders: Gets your saved reminders from the reminders.json file",
+                "- set_reminder: Saves a new reminder with optional reminder time (e.g., 'tomorrow at 3pm')",
+                "- manage_reminder: Manage, edit, or delete your reminders",
+                "- get_secret_key: Gets your secret key (for testing function calling)",
+            ]
+
+            if GOOGLE_CALENDAR_INTEGRATION:
+                TOOL_DESCRIPTIONS.append(
+                    "- get_calendar_events: Gets your Google Calendar events"
+                )
+
+            if HASS_INTEGRATION:
+                TOOL_DESCRIPTIONS += [
+                    "- control_home_entity: Control a home entity (e.g., turn on a light)",
+                    "- control_home_climate: Control a home climate (e.g., set the temperature)",
+                    "- get_home_entities_in_room: Get the entities in a specific room",
+                    "- find_home_entities_by_name: Find entities by name",
+                ]
+            if LINKEDIN_FORMATTER_INTEGRATION:
+                TOOL_DESCRIPTIONS.append(
+                    "- format_linkedin_post: Generate a LinkedIn post from provided context. The function will extract a topic and create a professionally formatted, viral-style post."
+                )
+
+            # Add MCP tools to the description list
+            if MCP_AVAILABLE and mcp_client:
+                mcp_declarations = mcp_client.get_gemini_tool_declarations()
+                for mcp_decl in mcp_declarations:
+                    TOOL_DESCRIPTIONS.append(f"- {mcp_decl['name']}: {mcp_decl['description']}")
+
+            TOOL_DESCRIPTIONS = [desc for desc in TOOL_DESCRIPTIONS if desc]
+
+            system_instruction_text = os.environ.get("PERSONALIZED_PROMPT", "You are a helpful assistant.") + "\nYou have access to the following tools:\n" + "\n".join(TOOL_DESCRIPTIONS) + "\n\nYou also have access to Google Search to find information online.\nDon't mention your origins or google.\n"
+            
+            CONFIG = types.LiveConnectConfig(
+                response_modalities=[
+                    "AUDIO",
+                ],
+                media_resolution="MEDIA_RESOLUTION_MEDIUM",
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=VOICE_NAME)
+                    )
+                ),
+                context_window_compression=types.ContextWindowCompressionConfig(
+                    trigger_tokens=25600,
+                    sliding_window=types.SlidingWindow(target_tokens=12800),
+                ),
+                system_instruction=types.Content(
+                    parts=[types.Part.from_text(text=system_instruction_text)],
+                    role="user"
+                ),
+                tools=tools,
+                realtime_input_config=types.RealtimeInputConfig(
+                    automatic_activity_detection=types.AutomaticActivityDetection(disabled=True)
+                )
+            )
+
             async with (
                 client.aio.live.connect(model=MODEL, config=CONFIG) as session,
                 asyncio.TaskGroup() as tg,
@@ -483,18 +629,55 @@ class AudioLoop:
                     tg.create_task(self.get_screen())
                 tg.create_task(self.receive_audio())
                 tg.create_task(self.play_audio())
-                await send_text_task
-                raise asyncio.CancelledError("User requested exit")
+
+                # Task to wait for the global shutdown event
+                shutdown_watcher_task = tg.create_task(APP_SHUTDOWN_EVENT.wait())
+
+                # Wait for any task to complete (or the shutdown event to be set)
+                done, pending = await asyncio.wait(
+                    [send_text_task, shutdown_watcher_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+
+                # If the shutdown event was set, cancel all other tasks
+                if shutdown_watcher_task in done:
+                    print("[INFO] Shutdown event received. Cancelling all running tasks...")
+                    for task in pending:
+                        task.cancel()
+                    # Wait for all tasks to be cancelled and finish
+                    await asyncio.gather(*pending, return_exceptions=True)
+
         except asyncio.CancelledError:
+            # This might still be raised by underlying libraries during forceful shutdown
             pass
+        except Exception as e:
+            # Dynamic comprehensive error handling for all Gemini API errors
+            self._handle_gemini_api_error(e)
         except ExceptionGroup as EG:
-            self.audio_stream.close()
+            if hasattr(self, 'audio_stream') and self.audio_stream:
+                self.audio_stream.close()
+            print("\n[ERROR] An ExceptionGroup occurred during runtime:")
             traceback.print_exception(EG)
+        finally:
+            print("[INFO] Initiating graceful shutdown...")
+            # Close audio stream if it's open
+            if hasattr(self, 'audio_stream') and self.audio_stream and self.audio_stream.is_active():
+                self.audio_stream.stop_stream()
+                self.audio_stream.close()
+            print("[INFO] Application shutdown complete.")
+        
+        # Cleanup MCP client outside of the TaskGroup context to avoid anyio issues
+        try:
+            print("[INFO] Cleaning up MCP clients...")
+            await cleanup_mcp_client()
+            print("[INFO] MCP cleanup complete.")
+        except Exception as cleanup_error:
+            print(f"[WARNING] MCP cleanup error (non-critical): {cleanup_error}")
 
 
 def shutdown_handler(signum, frame):
     print("\nShutting down gracefully...")
-    os._exit(0)  # Force exit (works even if threads are running)
+    APP_SHUTDOWN_EVENT.set() # Signal the application to shut down
 
 signal.signal(signal.SIGINT, shutdown_handler)
 signal.signal(signal.SIGTERM, shutdown_handler)
