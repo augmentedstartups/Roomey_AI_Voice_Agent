@@ -20,48 +20,11 @@ load_dotenv(project_root / '.env')
 # Get Home Assistant URL and token from environment variables
 HASS_URL = os.getenv('HASS_URL')
 HASS_TOKEN = os.getenv('HASS_TOKEN')
-HASS_INTEGRATION = os.getenv('HASS_INTEGRATION', 'false').lower() == 'true'
 
-if not HASS_INTEGRATION:
-    print("Home Assistant integration is disabled (HASS_INTEGRATION is not true). Home Assistant features will be unavailable.")
-    class HomeAssistant:
-        def __init__(self, *args, **kwargs):
-            print("[HomeAssistant] Integration is disabled.")
-        def get_entities(self, domain=None):
-            print("[HomeAssistant] get_entities called, but integration is disabled.")
-            return []
-        def get_entity_state(self, entity_id):
-            print("[HomeAssistant] get_entity_state called, but integration is disabled.")
-            return None
-        def call_service(self, domain, service, entity_id=None, **service_data):
-            print("[HomeAssistant] call_service called, but integration is disabled.")
-            return False
-        def turn_on(self, entity_id):
-            print("[HomeAssistant] turn_on called, but integration is disabled.")
-            return False
-        def turn_off(self, entity_id):
-            print("[HomeAssistant] turn_off called, but integration is disabled.")
-            return False
-        def toggle(self, entity_id):
-            print("[HomeAssistant] toggle called, but integration is disabled.")
-            return False
-        def set_climate(self, entity_id, temperature=None, hvac_mode=None):
-            print("[HomeAssistant] set_climate called, but integration is disabled.")
-            return False
-        def get_entity_info(self, entity_id):
-            print("[HomeAssistant] get_entity_info called, but integration is disabled.")
-            return {"error": "Home Assistant integration is disabled."}
-        def find_entities_by_name(self, name, exact=False):
-            print("[HomeAssistant] find_entities_by_name called, but integration is disabled.")
-            return []
-        def find_entities_in_room(self, room):
-            print("[HomeAssistant] find_entities_in_room called, but integration is disabled.")
-            return []
-else:
-    if not HASS_URL or not HASS_TOKEN:
-        print("Error: Home Assistant URL or token not set in .env file")
-        print("Please update the .env file with your Home Assistant information")
-        sys.exit(1)
+if not HASS_URL or not HASS_TOKEN:
+    print("Error: Home Assistant URL or token not set in .env file")
+    print("Please update the .env file with your Home Assistant information")
+    sys.exit(1)
 
 # Set up headers for API requests
 headers = {

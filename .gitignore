@@ -18,4 +18,3 @@ integrations/homeassistant/entities.json
 integrations/homeassistant/devices.json
 
 integrations/linkedinformater/output/
-__pycache__/tools.cpython-313.pyc
