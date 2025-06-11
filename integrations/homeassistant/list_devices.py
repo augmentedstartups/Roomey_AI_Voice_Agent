@@ -19,36 +19,6 @@ load_dotenv(project_root / '.env')
 # Get Home Assistant URL and token from environment variables
 HASS_URL = os.getenv('HASS_URL')
 HASS_TOKEN = os.getenv('HASS_TOKEN')
-HASS_INTEGRATION = os.getenv('HASS_INTEGRATION', 'false').lower() == 'true'
-
-if not HASS_INTEGRATION:
-    print("Home Assistant integration is disabled (HASS_INTEGRATION is not true). Skipping Home Assistant actions.")
-    def main():
-        print("No Home Assistant actions to perform.")
-        return
-else:
-    def main():
-        print("Fetching data from Home Assistant...")
-        entities = get_states()
-        print(f"\nSuccessfully retrieved {len(entities)} entities")
-        devices = get_devices()
-        print(f"Extracted information for {len(devices)} devices from entities")
-        print_devices(devices)
-        print_entities(entities)
-        with open(Path(__file__).parent / 'entities.json', 'w') as f:
-            json.dump(entities, f, indent=2)
-        with open(Path(__file__).parent / 'devices.json', 'w') as f:
-            json.dump(devices, f, indent=2)
-        home_data = {
-            'url': HASS_URL,
-            'token': HASS_TOKEN,
-            'entities': [e['entity_id'] for e in entities],
-            'devices': devices
-        }
-        with open(Path(__file__).parent / '.home', 'w') as f:
-            json.dump(home_data, f, indent=2)
-        print("\nData has been saved to entities.json, devices.json, and .home for reference")
-        print("Note: The .home file contains sensitive information and should not be committed to version control.")
 
 if not HASS_URL or not HASS_TOKEN or HASS_TOKEN == 'your_long_lived_token_here':
     print("Error: Home Assistant URL or token not set in .env file")
@@ -148,6 +118,43 @@ def print_devices(devices):
             if len(entities) > 5:
                 print(f"    ... and {len(entities) - 5} more")
         print()
+
+def main():
+    print("Fetching data from Home Assistant...")
+    
+    # Get all entities first
+    entities = get_states()
+    print(f"\nSuccessfully retrieved {len(entities)} entities")
+    
+    # Extract devices from entities
+    devices = get_devices()
+    print(f"Extracted information for {len(devices)} devices from entities")
+    
+    # Print devices and entities
+    print_devices(devices)
+    print_entities(entities)
+    
+    # Save to JSON files for later reference
+    with open(Path(__file__).parent / 'entities.json', 'w') as f:
+        json.dump(entities, f, indent=2)
+    
+    with open(Path(__file__).parent / 'devices.json', 'w') as f:
+        json.dump(devices, f, indent=2)
+        
+    # Save to .home file for secure storage
+    home_data = {
+        'url': HASS_URL,
+        'token': HASS_TOKEN,
+        'entities': [e['entity_id'] for e in entities],
+        'devices': devices
+    }
+    
+    with open(Path(__file__).parent / '.home', 'w') as f:
+        json.dump(home_data, f, indent=2)
+    
+    print("\nData has been saved to entities.json, devices.json, and .home for reference")
+    print("Note: The .home file contains sensitive information and should not be committed to version control.")
+
 
 if __name__ == "__main__":
     main()
