@@ -21,3 +21,4 @@
 - Ensured logs are always flushed and up-to-date
 - Fixed issues with environment variable types (string vs int)
 - Ensured both user and system messages are always logged, even for audio-only Gemini responses
+- Google calendar integration initialization

@@ -39,6 +39,7 @@ tools=[
 # Integration flags (should match tools.py)
 LINKEDIN_FORMATTER_INTEGRATION = os.getenv('LINKEDIN_FORMATTER_INTEGRATION', 'false').lower() == 'true'
 HASS_INTEGRATION = os.getenv('HASS_INTEGRATION', 'false').lower() == 'true'
+GOOGLE_CALENDAR_INTEGRATION = os.getenv('GOOGLE_CALENDAR_INTEGRATION', 'false').lower() == 'true'
 
 # Build dynamic tool list for system instruction
 TOOL_DESCRIPTIONS = [
@@ -46,8 +47,14 @@ TOOL_DESCRIPTIONS = [
     "- set_reminder: Saves a new reminder with optional reminder time (e.g., 'tomorrow at 3pm')",
     "- manage_reminder: Manage, edit, or delete your reminders",
     "- get_secret_key: Gets your secret key (for testing function calling)",
-    "- get_calendar_events: Gets your Google Calendar events" if os.getenv('GOOGLE_CALENDAR_INTEGRATION', 'true').lower() == 'true' else None,
 ]
+
+
+if GOOGLE_CALENDAR_INTEGRATION:
+    TOOL_DESCRIPTIONS.append(
+        "- get_calendar_events: Gets your Google Calendar events"
+    )
+
 if HASS_INTEGRATION:
     TOOL_DESCRIPTIONS += [
         "- control_home_entity: Control a home entity (e.g., turn on a light)",
@@ -59,6 +66,7 @@ if LINKEDIN_FORMATTER_INTEGRATION:
     TOOL_DESCRIPTIONS.append(
         "- format_linkedin_post: Generate a LinkedIn post from provided context. The function will extract a topic and create a professionally formatted, viral-style post."
     )
+
 
 TOOL_DESCRIPTIONS = [desc for desc in TOOL_DESCRIPTIONS if desc]
 
