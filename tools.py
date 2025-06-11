@@ -11,12 +11,6 @@ from integrations.reminders.reminders import (
     manage_reminder_declaration
 )
 
-# Import calendar functionality from the new module
-from integrations.calendar.google_calendar import (
-    get_calendar_events,
-    get_calendar_events_declaration
-)
-
 # Home Assistant integration (conditional)
 HASS_INTEGRATION = os.getenv('HASS_INTEGRATION', 'false').lower() == 'true'
 if HASS_INTEGRATION:
@@ -50,8 +44,19 @@ get_secret_key_declaration = {
     }
 }
 
+GOOGLE_CALENDAR_INTEGRATION = os.getenv('GOOGLE_CALENDAR_INTEGRATION', 'true').lower() == 'true'
+
+if GOOGLE_CALENDAR_INTEGRATION:
+    # Import calendar functionality from the new module
+    from integrations.calendar.google_calendar import (
+        get_calendar_events,
+        get_calendar_events_declaration
+    )
+
+
 # LinkedIn formatter integration (conditional)
 LINKEDIN_FORMATTER_INTEGRATION = os.getenv('LINKEDIN_FORMATTER_INTEGRATION', 'true').lower() == 'true'
+
 if LINKEDIN_FORMATTER_INTEGRATION:
     from integrations.linkedinformater.linkedin_formatter import format_linkedin_post
 
@@ -79,11 +84,12 @@ def get_tool_declarations():
         get_reminders_declaration,
         set_reminder_declaration,
         manage_reminder_declaration,
-        get_secret_key_declaration,
-        get_calendar_events_declaration
+        get_secret_key_declaration
     ]
     if LINKEDIN_FORMATTER_INTEGRATION:
         declarations.append(format_linkedin_post_declaration)
+    if GOOGLE_CALENDAR_INTEGRATION:
+        declarations.append(get_calendar_events_declaration)
     if HASS_INTEGRATION:
         declarations += [
             control_entity_declaration,
