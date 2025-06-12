@@ -29,3 +29,8 @@
 - MCP Support using `npx` with Auto discovery
 - New environment variables for MCP (MCP_ENABLED, MCP_CONFIG_PATH, NODEJS_BIN_PATH)
 - Gemini API error handler 
+- Removed NODEJS_BIN_PATH environment variable
+- Changed the custom mcp client to `mcp-use` library
+
+### Fixed
+- Graceful Shutdown was throwing error.

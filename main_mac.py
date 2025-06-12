@@ -308,31 +308,58 @@ class AudioLoop:
     def _blocking_listen_for_toggle_key(self): # Changed for pynput
         # pynput listener runs in its own thread.
         # The listener will automatically stop if this function's thread is stopped or if an error occurs.
-        with pynput_keyboard.Listener(on_press=self._on_press) as listener:
-            try:
-                print("Push-to-talk enabled (using pynput). Press 't' to toggle recording.")
-                listener.join() # This blocks until the listener stops
-            except Exception as e:
-                print(f"Pynput listener error: {e}")
-            finally:
-                print("Pynput listener stopped.")
+        listener = pynput_keyboard.Listener(on_press=self._on_press)
+        try:
+            print("Push-to-talk enabled (using pynput). Press 't' to toggle recording.")
+            listener.start()
+            
+            # Keep checking for shutdown events while listener is active
+            while listener.running:
+                # Check if shutdown has been requested
+                if APP_SHUTDOWN_EVENT.is_set() or (hasattr(self, 'shutdown_event') and self.shutdown_event.is_set()):
+                    print("[INFO] Keyboard listener shutting down...")
+                    listener.stop()
+                    break
+                # Small sleep to avoid busy waiting
+                import time
+                time.sleep(0.1)
+                
+        except Exception as e:
+            print(f"Pynput listener error: {e}")
+        finally:
+            if listener.running:
+                listener.stop()
+            print("Pynput listener stopped.")
 
 
     async def handle_keyboard_input(self): # Changed for pynput
         # Run the blocking pynput listener in a separate thread
         # The listener itself manages its own thread for event listening.
-        await self.main_event_loop.run_in_executor(None, self._blocking_listen_for_toggle_key)
+        try:
+            await self.main_event_loop.run_in_executor(None, self._blocking_listen_for_toggle_key)
+        except Exception as e:
+            print(f"[DEBUG] Keyboard input handler stopped: {e}")
 
     async def send_text(self):
         while True:
-            text = await asyncio.to_thread(
-                input,
-                "message > ",
-            )
-            if text.lower() == "q":
+            try:
+                text = await asyncio.to_thread(
+                    input,
+                    "message > ",
+                )
+                if text.lower() == "q":
+                    self.shutdown_event.set()
+                    break
+                await self.session.send(input=text or ".", end_of_turn=True)
+            except EOFError:
+                # Handle Ctrl+C or EOF gracefully
+                print("\n[INFO] Input interrupted, shutting down...")
                 self.shutdown_event.set()
+                APP_SHUTDOWN_EVENT.set()
                 break
-            await self.session.send(input=text or ".", end_of_turn=True)
+            except Exception as e:
+                print(f"[DEBUG] Error in send_text: {e}")
+                break
 
     def _get_frame(self, cap):
         # Read the frameq
@@ -579,7 +606,7 @@ class AudioLoop:
 
             # Add MCP tools to the description list
             if MCP_AVAILABLE and mcp_client:
-                mcp_declarations = mcp_client.get_gemini_tool_declarations()
+                mcp_declarations = mcp_client.get_tool_declarations()
                 for mcp_decl in mcp_declarations:
                     TOOL_DESCRIPTIONS.append(f"- {mcp_decl['name']}: {mcp_decl['description']}")
 
@@ -667,12 +694,18 @@ class AudioLoop:
             print("[INFO] Application shutdown complete.")
         
         # Cleanup MCP client outside of the TaskGroup context to avoid anyio issues
+        print("[INFO] Cleaning up MCP clients...")
         try:
-            print("[INFO] Cleaning up MCP clients...")
-            await cleanup_mcp_client()
-            print("[INFO] MCP cleanup complete.")
+            # Use asyncio.wait_for with a shorter timeout to prevent hanging during cleanup
+            await asyncio.wait_for(cleanup_mcp_client(), timeout=3.0)
+            print("[INFO] MCP cleanup completed successfully.")
+        except asyncio.TimeoutError:
+            print("[WARNING] MCP cleanup timed out after 3 seconds - forcing shutdown")
         except Exception as cleanup_error:
             print(f"[WARNING] MCP cleanup error (non-critical): {cleanup_error}")
+        finally:
+            # Ensure we always complete the shutdown process
+            print("[INFO] Final cleanup completed.")
 
 
 def shutdown_handler(signum, frame):

@@ -100,13 +100,17 @@ async def cleanup_mcp_client():
     global mcp_client, MCP_AVAILABLE
     if mcp_client and MCP_AVAILABLE:
         try:
-            await mcp_client.cleanup()
+            # Add timeout to prevent hanging during cleanup
+            await asyncio.wait_for(mcp_client.cleanup(), timeout=5.0)
+        except asyncio.TimeoutError:
+            print(f"[MCP] Cleanup timed out after 5 seconds - forcing cleanup")
         except Exception as e:
-            print(f"[MCP] Cleanup completed with minor warnings: {e}")
+            print(f"[MCP] Cleanup completed with warnings: {e}")
         finally:
             # Reset the global state
             mcp_client = None
             MCP_AVAILABLE = False
+            print("[MCP] Global MCP client state reset")
 
 # Removed call_mcp_tool and call_mcp_tool_declaration as they are replaced by dynamic MCP tools
 
@@ -135,7 +139,7 @@ async def get_tool_declarations():
         ]
     
     if MCP_AVAILABLE and mcp_client: # Check mcp_client is not None
-        mcp_declarations = mcp_client.get_gemini_tool_declarations()
+        mcp_declarations = mcp_client.get_tool_declarations()
         if mcp_declarations:
             print("[MCP] Adding dynamically discovered MCP tools to declarations.")
             declarations.extend(mcp_declarations)
@@ -171,14 +175,14 @@ def get_function_map():
     
     if MCP_AVAILABLE and mcp_client: # Check mcp_client is not None
         # Dynamically add functions for each discovered MCP tool
-        for gemini_tool_decl in mcp_client.get_gemini_tool_declarations():
-            gemini_tool_name = gemini_tool_decl["name"]
-            # Create a closure function to wrap the async execute_gemini_mcp_tool call
-            # Use default parameter to capture the current value of gemini_tool_name
-            def create_mcp_wrapper(tool_name=gemini_tool_name):
-                return lambda **kwargs: asyncio.run(mcp_client.execute_gemini_mcp_tool(tool_name, kwargs))
-            function_map[gemini_tool_name] = create_mcp_wrapper()
-            print(f"[MCP] Mapped function '{gemini_tool_name}' to MCP client execution.")
+        for tool_decl in mcp_client.get_tool_declarations():
+            tool_name = tool_decl["name"]
+            # Create a closure function to wrap the async execute_mcp_tool call
+            # Use default parameter to capture the current value of tool_name
+            def create_mcp_wrapper(tool_name=tool_name):
+                return lambda **kwargs: asyncio.run(mcp_client.execute_mcp_tool(tool_name, kwargs))
+            function_map[tool_name] = create_mcp_wrapper()
+            print(f"[MCP] Mapped function '{tool_name}' to MCP client execution.")
     
     return function_map
 
