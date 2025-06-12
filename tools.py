@@ -1,6 +1,14 @@
 import os
+import warnings
 from google.genai import types
 import asyncio # Import asyncio
+
+# Suppress mcp-use warnings globally
+warnings.filterwarnings("ignore", message=".*non-text parts.*")
+warnings.filterwarnings("ignore", message=".*non-data parts.*")
+warnings.filterwarnings("ignore", message=".*returning concatenated.*")
+warnings.filterwarnings("ignore", message=".*executable_code.*")
+warnings.filterwarnings("ignore", message=".*code_execution_result.*")
 
 # Import reminders functionality from the new module
 from integrations.reminders.reminders import (

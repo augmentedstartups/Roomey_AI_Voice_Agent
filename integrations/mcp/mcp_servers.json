@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "google-calendar": {
+    "paypal-mcp-server": {
       "command": "npx",
-      "args": ["-y", "@cocal/google-calendar-mcp"],
-      "env": {
-        "GOOGLE_OAUTH_CREDENTIALS": "C:/Users/HnCvj/.config/google-calendar-mcp/tokens.json"
-      }
+      "args": [
+        "mcp-remote",
+        "https://mcp.paypal.com/sse"
+      ]
     }
   }
 }

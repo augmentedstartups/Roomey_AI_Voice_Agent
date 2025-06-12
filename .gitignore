@@ -4,6 +4,7 @@ __pycache__/
 utils/__pycache__/
 .env
 .windsurf/
+logs/
 
 # Google Calendar API credentials
 integrations/calendar/credentials/*.json
