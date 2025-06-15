@@ -39,3 +39,6 @@
 ### Added
 - Setup wizard using `setup.py` (Respects existing env file as well as backups the existing file in case of override)
 - New environment variables for `Push to talk` key choice
+
+### Fixed
+- Issue with `message >` making press of `Enter` mandatory. 

@@ -166,6 +166,10 @@ class SetupWizard:
             return 'choice'
         elif var_name == 'PUSH_TO_TALK_KEY':
             return 'single_char'
+        elif var_name == 'MIC_DEVICE_INDEX':
+            return 'integer'
+        elif var_name == 'MIC_CHANGE_KEY':
+            return 'single_char'
         else:
             return 'string'
 

@@ -42,22 +42,59 @@ LINKEDIN_FORMATTER_INTEGRATION = os.getenv('LINKEDIN_FORMATTER_INTEGRATION', 'fa
 HASS_INTEGRATION = os.getenv('HASS_INTEGRATION', 'false').lower() == 'true'
 GOOGLE_CALENDAR_INTEGRATION = os.getenv('GOOGLE_CALENDAR_INTEGRATION', 'false').lower() == 'true'
 
+# Initialize PyAudio and get device info
 pya = pyaudio.PyAudio()
-info = pya.get_host_api_info_by_index(0)
-numdevices = info.get('deviceCount')
 
-for i in range(0, numdevices):
-    if (pya.get_device_info_by_index(i).get('maxInputChannels')) > 0:
-        print ("Input Device id ", i, " - ", pya.get_device_info_by_index(i).get('name'))
+def get_available_input_devices():
+    """Get list of available input devices."""
+    devices = []
+    info = pya.get_host_api_info_by_index(0)
+    numdevices = info.get('deviceCount')
+    
+    for i in range(0, numdevices):
+        device_info = pya.get_device_info_by_index(i)
+        if device_info.get('maxInputChannels') > 0:
+            devices.append({
+                'index': i,
+                'name': device_info.get('name'),
+                'channels': device_info.get('maxInputChannels')
+            })
+    return devices
 
+def select_initial_microphone():
+    """Prompt user to select an initial microphone device."""
+    available_mics = get_available_input_devices()
+    if not available_mics:
+        print("❌ No input audio devices found. Exiting.")
+        sys.exit(1)
+
+    print("\n🎤 Available Input Microphones:")
+    for mic in available_mics:
+        print(f"  ID: {mic['index']} - Name: {mic['name']} (Channels: {mic['channels']})")
+
+    while True:
+        try:
+            selected_id = input("Enter the ID of the microphone to use: ").strip()
+            selected_id = int(selected_id)
+            if any(mic['index'] == selected_id for mic in available_mics):
+                return selected_id
+            else:
+                print("❌ Invalid ID. Please enter a valid microphone ID from the list.")
+        except ValueError:
+            print("❌ Invalid input. Please enter a number.")
+        except KeyboardInterrupt:
+            print("\nSetup cancelled by user. Exiting.")
+            sys.exit(1)
+
+# Load environment variables
 LOG_CONVERSATION = os.getenv('LOG_CONVERSATION', 'false').lower() == 'true'
-
-# Focus-aware input and configurable key bindings
 FOCUS_AWARE_INPUT = os.getenv('FOCUS_AWARE_INPUT', 'false').lower() == 'true'
 PUSH_TO_TALK_KEY = os.getenv('PUSH_TO_TALK_KEY', 't')
+MIC_CHANGE_KEY = os.getenv('MIC_CHANGE_KEY', 'm') # New configurable key for changing mic
+MIC_DEVICE_INDEX = int(os.environ.get("MIC_DEVICE_INDEX", -1)) # Default to -1 to indicate no selection
 
 class AudioLoop:
-    def __init__(self, video_mode=DEFAULT_MODE):
+    def __init__(self, video_mode=DEFAULT_MODE, initial_mic_index=None):
         self.video_mode = video_mode
         self.audio_in_queue = None
         self.out_queue = None # Used for video/screen frames
@@ -72,6 +109,12 @@ class AudioLoop:
         if LOG_CONVERSATION:
             self.recognizer = sr.Recognizer()
         self.log_file_path = None
+        self.mic_device_index = initial_mic_index # Store the selected microphone index
+        self.audio_stream = None # PyAudio stream object
+        self.mic_change_lock = asyncio.Lock() # To prevent race conditions during mic change
+        self.processing_audio = False # New flag to indicate audio processing is ongoing
+        self.audio_processing_event = asyncio.Event() # Event to signal audio processing completion
+        self.audio_processing_event.set() # Initially set, as no processing is happening
 
     def _get_log_file_path(self):
         today = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -218,7 +261,9 @@ class AudioLoop:
             sys.exit(1)
 
     async def _process_audio_buffer_stt(self, audio_buffer):
-        """Process audio buffer for speech-to-text in a separate thread to avoid blocking."""
+        """Process audio buffer for speech-to-text."""
+        self.processing_audio = True
+        self.audio_processing_event.clear() # Clear the event while processing
         try:
             import wave
             import tempfile
@@ -247,24 +292,25 @@ class AudioLoop:
         except Exception as e:
             print(f"\n[SpeechRecognition] Error: {e}")
             self._log_message("User", f"[STT error: {e}]")
+        finally:
+            self.processing_audio = False
+            self.audio_processing_event.set() # Set the event when processing is done
 
     async def toggle_recording(self): # Added for push-to-talk
         self.is_recording = not self.is_recording
         if self.is_recording:
-            print(f"\n🎤 Recording started... (Press '{PUSH_TO_TALK_KEY}' to stop)")
+            print(f"\n🎤 Listening...")
             self.audio_buffer = bytearray()  # Reset buffer
             if self.session:
                 await self.session.send_realtime_input(activity_start=types.ActivityStart())
         else:
-            print(f"\n🛑 Recording stopped. (Press '{PUSH_TO_TALK_KEY}' to start)")
+            print(f"\n🧠 Getting back to you with a response...")
             if self.session:
                 await self.session.send_realtime_input(activity_end=types.ActivityEnd())
-            # After recording stops, run STT and log if enabled - use separate thread to avoid blocking
+            # After recording stops, run STT and log if enabled
             if LOG_CONVERSATION and self.audio_buffer:
-                # Copy the audio buffer to avoid race conditions
-                audio_buffer_copy = bytearray(self.audio_buffer)
-                # Process STT in a separate thread to avoid blocking the keyboard listener
-                asyncio.create_task(asyncio.to_thread(self._process_audio_buffer_stt, audio_buffer_copy))
+                audio_buffer_copy = bytearray(self.audio_buffer) # Copy to avoid race conditions
+                asyncio.create_task(self._process_audio_buffer_stt(audio_buffer_copy))
 
     async def handle_function_call(self, response_text, tool_call):
         if tool_call and hasattr(tool_call, 'function_calls') and tool_call.function_calls:
@@ -342,8 +388,14 @@ class AudioLoop:
                 if self._is_terminal_focused():
                     asyncio.run_coroutine_threadsafe(self.toggle_recording(), self.main_event_loop)
                 else:
-                    # Optionally log when key press is ignored due to focus
-                    pass  # Silently ignore when not focused
+                    # Silently ignore when not focused
+                    pass
+            # Check if the pressed key matches our configurable microphone change key
+            elif key == pynput_keyboard.KeyCode.from_char(MIC_CHANGE_KEY):
+                if self._is_terminal_focused():
+                    asyncio.run_coroutine_threadsafe(self.change_microphone(), self.main_event_loop)
+                else:
+                    pass
         except AttributeError:
             # Special keys (like shift, alt, etc.) don't have a char attribute
             pass
@@ -356,8 +408,6 @@ class AudioLoop:
         # The listener will automatically stop if this function's thread is stopped or if an error occurs.
         listener = pynput_keyboard.Listener(on_press=self._on_press)
         try:
-            focus_msg = " (focus-aware)" if FOCUS_AWARE_INPUT else ""
-            print(f"Push-to-talk enabled{focus_msg}. Press '{PUSH_TO_TALK_KEY}' to toggle recording.")
             listener.start()
             
             # Keep checking for shutdown events while listener is active
@@ -390,6 +440,8 @@ class AudioLoop:
     async def send_text(self):
         while True:
             try:
+                # Wait until audio processing is complete before prompting for text input
+                await self.audio_processing_event.wait()
                 text = await asyncio.to_thread(
                     input,
                     "message > ",
@@ -397,7 +449,14 @@ class AudioLoop:
                 if text.lower() == "q":
                     self.shutdown_event.set()
                     break
-                await self.session.send(input=text or ".", end_of_turn=True)
+                elif text.lower() == PUSH_TO_TALK_KEY.lower():
+                    print(f"\n[INFO] '{PUSH_TO_TALK_KEY}' typed in prompt. Toggling recording...")
+                    await self.toggle_recording()
+                elif text.lower() == MIC_CHANGE_KEY.lower():
+                    print(f"\n[INFO] '{MIC_CHANGE_KEY}' typed in prompt. Changing microphone...")
+                    await self.change_microphone()
+                else:
+                    await self.session.send(input=text or ".", end_of_turn=True)
             except EOFError:
                 # Handle Ctrl+C or EOF gracefully
                 print("\n[INFO] Input interrupted, shutting down...")
@@ -482,40 +541,118 @@ class AudioLoop:
             await self.session.send(input=msg)
 
     async def listen_audio(self):
-        mic_info = pya.get_default_input_device_info()
-        self.audio_stream = await asyncio.to_thread(
-            pya.open,
-            format=FORMAT,
-            channels=int(CHANNELS),
-            rate=int(SEND_SAMPLE_RATE),
-            input=True,
-            input_device_index=mic_info["index"],
-            frames_per_buffer=CHUNK_SIZE,
-        )
-        if __debug__:
-            kwargs = {"exception_on_overflow": False}
-        else:
-            kwargs = {}
+        last_mic_index = None # Keep track of the mic index used to open the current stream
         while True:
-            if self.is_recording: # Modified for push-to-talk
+            if APP_SHUTDOWN_EVENT.is_set():
+                break
+
+            # Check if stream needs to be opened or re-opened
+            if self.audio_stream is None or self.mic_device_index != last_mic_index:
+                if self.audio_stream and self.audio_stream.is_active():
+                    self.audio_stream.stop_stream()
+                    self.audio_stream.close()
+                    self.audio_stream = None # Ensure it's None for re-opening
+
                 try:
-                    data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
-                    if self.session:
-                        await self.session.send_realtime_input(
-                            audio=types.Blob(data=data, mime_type=f"audio/pcm;rate={SEND_SAMPLE_RATE}")
-                        )
-                    if LOG_CONVERSATION:
-                        self.audio_buffer.extend(data)
-                except pyaudio.paInputOverflowed:
-                    if __debug__:
-                        print("Input overflowed. Skipping frame.")
-                    continue # Skip this frame and continue
+                    self.audio_stream = await asyncio.to_thread(
+                        pya.open,
+                        format=FORMAT,
+                        channels=int(CHANNELS),
+                        rate=int(SEND_SAMPLE_RATE),
+                        input=True,
+                        input_device_index=self.mic_device_index,
+                        frames_per_buffer=CHUNK_SIZE,
+                    )
+                    last_mic_index = self.mic_device_index # Update last used index
+                    print(f"🎤 Using microphone: {pya.get_device_info_by_index(self.mic_device_index).get('name')}")
                 except Exception as e:
-                    print(f"Error reading audio stream: {e}")
-                    await asyncio.sleep(0.1) # Avoid tight loop on continuous error
+                    print(f"❌ Error opening audio stream for device {self.mic_device_index}: {e}")
+                    print("Please ensure the selected microphone is available and try again. Retrying in 2 seconds...")
+                    self.audio_stream = None # Ensure stream is marked as closed/failed
+                    last_mic_index = None # Reset last_mic_index to force re-attempt
+                    await asyncio.sleep(2) # Wait before retrying
+                    continue # Continue outer loop to try opening stream again
+
+            # If stream is open, read audio
+            if self.audio_stream and self.audio_stream.is_active():
+                if __debug__:
+                    kwargs = {"exception_on_overflow": False}
+                else:
+                    kwargs = {}
+                if self.is_recording: # Modified for push-to-talk
+                    try:
+                        data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
+                        if self.session:
+                            await self.session.send_realtime_input(
+                                audio=types.Blob(data=data, mime_type=f"audio/pcm;rate={SEND_SAMPLE_RATE}")
+                            )
+                        if LOG_CONVERSATION:
+                            self.audio_buffer.extend(data)
+                    except pyaudio.paInputOverflowed:
+                        if __debug__:
+                            print("Input overflowed. Skipping frame.")
+                        continue # Skip this frame and continue
+                    except Exception as e:
+                        print(f"Error reading audio stream: {e}")
+                        # If reading fails, close stream to force re-opening in next iteration
+                        if self.audio_stream and self.audio_stream.is_active():
+                            self.audio_stream.stop_stream()
+                            self.audio_stream.close()
+                        self.audio_stream = None
+                        last_mic_index = None # Force re-open attempt
+                        await asyncio.sleep(0.1) # Small delay to prevent tight loop
+                else:
+                    # Sleep briefly when not recording to avoid busy-waiting
+                    await asyncio.sleep(0.01)
             else:
-                # Sleep briefly when not recording to avoid busy-waiting
+                # If stream is not active (e.g., closed by change_microphone), sleep briefly
+                # and let the outer loop try to re-open it.
                 await asyncio.sleep(0.01)
+
+    async def change_microphone(self):
+        """Allows the user to change the microphone during runtime."""
+        async with self.mic_change_lock:
+            print("\n--- Changing Microphone ---")
+            available_mics = get_available_input_devices()
+            if not available_mics:
+                print("❌ No input audio devices found.")
+                return
+
+            print("\n🎤 Available Input Microphones:")
+            for mic in available_mics:
+                print(f"  ID: {mic['index']} - Name: {mic['name']} (Channels: {mic['channels']})")
+
+            while True:
+                try:
+                    new_mic_id_str = await asyncio.to_thread(input, "Enter the ID of the new microphone to use: ")
+                    new_mic_id = int(new_mic_id_str.strip())
+                    if any(mic['index'] == new_mic_id for mic in available_mics):
+                        self.mic_device_index = new_mic_id
+                        print(f"✅ Microphone changed to: {pya.get_device_info_by_index(self.mic_device_index).get('name')}")
+                        
+                        # Stop and restart the audio stream
+                        if self.audio_stream and self.audio_stream.is_active():
+                            self.audio_stream.stop_stream()
+                            self.audio_stream.close()
+                            self.audio_stream = None # Clear the old stream
+                        
+                        # Restart listen_audio task to use the new microphone
+                        # This assumes listen_audio is a task that can be restarted
+                        # For simplicity, we'll just let the main loop handle it by re-creating the task
+                        # or by calling listen_audio directly if it's designed to be re-callable.
+                        # For now, we'll rely on the next iteration of the main loop to pick up the change.
+                        print("🔄 Restarting audio stream with new microphone...")
+                        # A more robust solution would involve cancelling the old listen_audio task
+                        # and creating a new one. For this example, we'll assume listen_audio
+                        # will re-initialize if self.audio_stream is None.
+                        break
+                    else:
+                        print("❌ Invalid ID. Please enter a valid microphone ID from the list.")
+                except ValueError:
+                    print("❌ Invalid input. Please enter a number.")
+                except KeyboardInterrupt:
+                    print("\nMicrophone change cancelled.")
+                    break
 
     async def receive_audio(self):
         "Background task to reads from the websocket and write pcm chunks to the output queue"
@@ -584,6 +721,20 @@ class AudioLoop:
                         except Exception as e:
                             print(f"\n[SpeechRecognition] Error transcribing Gemini audio: {e}")
                             self._log_message("Roomey", f"[STT error (Gemini): {e}]")
+                
+                # Re-print the readiness messages after AI response
+                if PUSH_TO_TALK_KEY: # Check if push-to-talk is enabled
+                    focus_msg = " (focus-aware)" if FOCUS_AWARE_INPUT else ""
+                    print(f"\nPush-to-talk enabled{focus_msg}. Press '{PUSH_TO_TALK_KEY}' to toggle recording.")
+                
+                # Print microphone info
+                if self.mic_device_index != -1:
+                    try:
+                        mic_name = pya.get_device_info_by_index(self.mic_device_index).get('name')
+                        print(f"🎤 Using microphone: {mic_name}")
+                    except Exception as e:
+                        print(f"❌ Could not retrieve microphone name: {e}")
+
                 # Always flush log file after writing
                 if self.log_file_path:
                     try:
@@ -693,23 +844,31 @@ class AudioLoop:
                 self.main_event_loop = asyncio.get_running_loop() # Set event loop here
                 self.audio_in_queue = asyncio.Queue()
                 self.out_queue = asyncio.Queue(maxsize=5) # For video/screen frames
-                send_text_task = tg.create_task(self.send_text())
-                tg.create_task(self.send_realtime()) # For video/screen frames
-                tg.create_task(self.listen_audio()) # Now handles its own sending for audio
-                tg.create_task(self.handle_keyboard_input()) # Only push-to-talk
+                
+                tasks = []
+                if not PUSH_TO_TALK_KEY: # Only start send_text if push-to-talk is not enabled
+                    send_text_task = tg.create_task(self.send_text())
+                    tasks.append(send_text_task)
+                else:
+                    send_text_task = None # No send_text_task if push-to-talk is enabled
+
+                tasks.append(tg.create_task(self.send_realtime())) # For video/screen frames
+                tasks.append(tg.create_task(self.listen_audio())) # Now handles its own sending for audio
+                tasks.append(tg.create_task(self.handle_keyboard_input())) # Only push-to-talk
                 if self.video_mode == "camera":
-                    tg.create_task(self.get_frames())
+                    tasks.append(tg.create_task(self.get_frames()))
                 elif self.video_mode == "screen":
-                    tg.create_task(self.get_screen())
-                tg.create_task(self.receive_audio())
-                tg.create_task(self.play_audio())
+                    tasks.append(tg.create_task(self.get_screen()))
+                tasks.append(tg.create_task(self.receive_audio()))
+                tasks.append(tg.create_task(self.play_audio()))
 
                 # Task to wait for the global shutdown event
                 shutdown_watcher_task = tg.create_task(APP_SHUTDOWN_EVENT.wait())
+                tasks.append(shutdown_watcher_task)
 
                 # Wait for any task to complete (or the shutdown event to be set)
                 done, pending = await asyncio.wait(
-                    [send_text_task, shutdown_watcher_task],
+                    tasks,
                     return_when=asyncio.FIRST_COMPLETED
                 )
 
@@ -764,10 +923,11 @@ signal.signal(signal.SIGTERM, shutdown_handler)
 
 if __name__ == "__main__":
     print("🤖Starting AI Assistant...")
-    print(f"ℹ️ Press '{PUSH_TO_TALK_KEY}' to toggle audio recording for voice input.")
+    print(f"ℹ️ Press '{MIC_CHANGE_KEY}' to change the microphone device.")
     print("ℹ️ Type 'q' and press Enter in the 'message >' prompt to quit.")
     if FOCUS_AWARE_INPUT:
         print("🔍 Focus-aware input enabled (Windows only) - keys only work when terminal is focused.")
+    
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
@@ -777,5 +937,13 @@ if __name__ == "__main__":
         choices=["camera", "screen", "none"],
     )
     args = parser.parse_args()
-    main = AudioLoop(video_mode=args.mode)
+
+    # Initial microphone selection
+    if MIC_DEVICE_INDEX == -1: # Only prompt if not set in .env
+        selected_mic_index = select_initial_microphone()
+    else:
+        selected_mic_index = MIC_DEVICE_INDEX
+        print(f"🎤 Using microphone from .env: {pya.get_device_info_by_index(selected_mic_index).get('name')}")
+
+    main = AudioLoop(video_mode=args.mode, initial_mic_index=selected_mic_index)
     asyncio.run(main.run())
