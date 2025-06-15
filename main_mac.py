@@ -9,6 +9,12 @@ import threading
 import signal
 import speech_recognition as sr
 import datetime
+import sys
+
+# Windows-specific imports for focus detection
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
 
 APP_SHUTDOWN_EVENT = asyncio.Event() # Global event for graceful shutdown
 
@@ -45,6 +51,10 @@ for i in range(0, numdevices):
         print ("Input Device id ", i, " - ", pya.get_device_info_by_index(i).get('name'))
 
 LOG_CONVERSATION = os.getenv('LOG_CONVERSATION', 'false').lower() == 'true'
+
+# Focus-aware input and configurable key bindings
+FOCUS_AWARE_INPUT = os.getenv('FOCUS_AWARE_INPUT', 'false').lower() == 'true'
+PUSH_TO_TALK_KEY = os.getenv('PUSH_TO_TALK_KEY', 't')
 
 class AudioLoop:
     def __init__(self, video_mode=DEFAULT_MODE):
@@ -207,47 +217,54 @@ class AudioLoop:
             # Fallback if no event loop
             sys.exit(1)
 
+    async def _process_audio_buffer_stt(self, audio_buffer):
+        """Process audio buffer for speech-to-text in a separate thread to avoid blocking."""
+        try:
+            import wave
+            import tempfile
+            # Write buffer to a temporary WAV file for SpeechRecognition
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_wav:
+                with wave.open(tmp_wav, 'wb') as wf:
+                    wf.setnchannels(int(CHANNELS))
+                    wf.setsampwidth(pya.get_sample_size(FORMAT))
+                    wf.setframerate(int(SEND_SAMPLE_RATE))
+                    wf.writeframes(audio_buffer)
+                tmp_wav_path = tmp_wav.name
+            
+            with sr.AudioFile(tmp_wav_path) as source:
+                audio = self.recognizer.record(source)
+                try:
+                    text = self.recognizer.recognize_google(audio)
+                    print(f"\n[SpeechRecognition] You said: {text}")
+                    self._log_message("User", text)
+                except sr.UnknownValueError:
+                    print("\n[SpeechRecognition] Could not understand audio")
+                    self._log_message("User", "[Unrecognized speech]")
+                except sr.RequestError as e:
+                    print(f"\n[SpeechRecognition] Recognition error: {e}")
+                    self._log_message("User", f"[Recognition error: {e}]")
+            os.remove(tmp_wav_path)
+        except Exception as e:
+            print(f"\n[SpeechRecognition] Error: {e}")
+            self._log_message("User", f"[STT error: {e}]")
+
     async def toggle_recording(self): # Added for push-to-talk
         self.is_recording = not self.is_recording
         if self.is_recording:
-            print("\n🎤 Recording started... (Press 't' to stop)")
+            print(f"\n🎤 Recording started... (Press '{PUSH_TO_TALK_KEY}' to stop)")
             self.audio_buffer = bytearray()  # Reset buffer
             if self.session:
                 await self.session.send_realtime_input(activity_start=types.ActivityStart())
         else:
-            print("\n🛑 Recording stopped. (Press 't' to start)")
+            print(f"\n🛑 Recording stopped. (Press '{PUSH_TO_TALK_KEY}' to start)")
             if self.session:
                 await self.session.send_realtime_input(activity_end=types.ActivityEnd())
-            # After recording stops, run STT and log if enabled
+            # After recording stops, run STT and log if enabled - use separate thread to avoid blocking
             if LOG_CONVERSATION and self.audio_buffer:
-                try:
-                    import wave
-                    import tempfile
-                    # Write buffer to a temporary WAV file for SpeechRecognition
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_wav:
-                        with wave.open(tmp_wav, 'wb') as wf:
-                            wf.setnchannels(int(CHANNELS))
-                            wf.setsampwidth(pya.get_sample_size(FORMAT))
-                            wf.setframerate(int(SEND_SAMPLE_RATE))
-                            wf.writeframes(self.audio_buffer)
-                        tmp_wav_path = tmp_wav.name
-                        #print(f"[DEBUG] Temporary WAV file created at: {tmp_wav_path}")
-                    with sr.AudioFile(tmp_wav_path) as source:
-                        audio = self.recognizer.record(source)
-                        try:
-                            text = self.recognizer.recognize_google(audio)
-                            print(f"\n[SpeechRecognition] You said: {text}")
-                            self._log_message("User", text)
-                        except sr.UnknownValueError:
-                            print("\n[SpeechRecognition] Could not understand audio")
-                            self._log_message("User", "[Unrecognized speech]")
-                        except sr.RequestError as e:
-                            print(f"\n[SpeechRecognition] Recognition error: {e}")
-                            self._log_message("User", f"[Recognition error: {e}]")
-                    os.remove(tmp_wav_path)
-                except Exception as e:
-                    print(f"\n[SpeechRecognition] Error: {e}")
-                    self._log_message("User", f"[STT error: {e}]")
+                # Copy the audio buffer to avoid race conditions
+                audio_buffer_copy = bytearray(self.audio_buffer)
+                # Process STT in a separate thread to avoid blocking the keyboard listener
+                asyncio.create_task(asyncio.to_thread(self._process_audio_buffer_stt, audio_buffer_copy))
 
     async def handle_function_call(self, response_text, tool_call):
         if tool_call and hasattr(tool_call, 'function_calls') and tool_call.function_calls:
@@ -294,10 +311,39 @@ class AudioLoop:
                     
         return False
 
+    def _is_terminal_focused(self):
+        """Check if the terminal window is currently focused (Windows only)."""
+        if not FOCUS_AWARE_INPUT or sys.platform != "win32":
+            return True  # Always allow if focus detection is disabled or not on Windows
+        
+        try:
+            # Get the foreground window
+            foreground_window = ctypes.windll.user32.GetForegroundWindow()
+            if not foreground_window:
+                return True  # Default to allow if we can't get the window
+            
+            # Get the process ID of the foreground window
+            foreground_pid = wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(foreground_window, ctypes.byref(foreground_pid))
+            
+            # Compare with our process ID
+            our_pid = os.getpid()
+            return foreground_pid.value == our_pid
+        except Exception as e:
+            # If focus detection fails, default to allowing input
+            print(f"[DEBUG] Focus detection error (defaulting to allow): {e}")
+            return True
+
     def _on_press(self, key): # Changed for pynput
         try:
-            if key == pynput_keyboard.KeyCode.from_char('t'):
-                asyncio.run_coroutine_threadsafe(self.toggle_recording(), self.main_event_loop)
+            # Check if the pressed key matches our configurable push-to-talk key
+            if key == pynput_keyboard.KeyCode.from_char(PUSH_TO_TALK_KEY):
+                # Check if focus-aware input is enabled and if terminal is focused
+                if self._is_terminal_focused():
+                    asyncio.run_coroutine_threadsafe(self.toggle_recording(), self.main_event_loop)
+                else:
+                    # Optionally log when key press is ignored due to focus
+                    pass  # Silently ignore when not focused
         except AttributeError:
             # Special keys (like shift, alt, etc.) don't have a char attribute
             pass
@@ -310,7 +356,8 @@ class AudioLoop:
         # The listener will automatically stop if this function's thread is stopped or if an error occurs.
         listener = pynput_keyboard.Listener(on_press=self._on_press)
         try:
-            print("Push-to-talk enabled (using pynput). Press 't' to toggle recording.")
+            focus_msg = " (focus-aware)" if FOCUS_AWARE_INPUT else ""
+            print(f"Push-to-talk enabled{focus_msg}. Press '{PUSH_TO_TALK_KEY}' to toggle recording.")
             listener.start()
             
             # Keep checking for shutdown events while listener is active
@@ -717,8 +764,10 @@ signal.signal(signal.SIGTERM, shutdown_handler)
 
 if __name__ == "__main__":
     print("🤖Starting AI Assistant...")
-    print("ℹ️ Press 't' to toggle audio recording for voice input.")
+    print(f"ℹ️ Press '{PUSH_TO_TALK_KEY}' to toggle audio recording for voice input.")
     print("ℹ️ Type 'q' and press Enter in the 'message >' prompt to quit.")
+    if FOCUS_AWARE_INPUT:
+        print("🔍 Focus-aware input enabled (Windows only) - keys only work when terminal is focused.")
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
